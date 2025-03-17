@@ -9,4 +9,11 @@ leptos = { version = "0.7.7", features = ["csr"] }
 
 [dependencies.web-sys]
 version = "0.3"
-features = ["HtmlElement", "CanvasRenderingContext2d"]
+features = [
+    "HtmlElement",
+    "WebGl2RenderingContext",
+    "WebGlBuffer",
+    "WebGlVertexArrayObject",
+    "WebGlShader",
+    "WebGlProgram"
+]
