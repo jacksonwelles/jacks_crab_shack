@@ -1,15 +1,17 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use leptos::html::Canvas;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::prelude::*;
 
+use web_sys::console;
 use web_sys::js_sys;
 use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader};
-use web_sys::console;
 
 #[component]
 pub fn App() -> impl IntoView {
     let canvas_ref = NodeRef::<Canvas>::new();
-    let (count, set_count) = signal(0);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
             let context = canvas
@@ -49,68 +51,84 @@ pub fn App() -> impl IntoView {
             )
             .unwrap();
             let program = link_program(&context, &vert_shader, &frag_shader).unwrap();
-            context.use_program(Some(&program));
 
-            let factor: f32 = count.get() as f32 / 50.0;
-            let mut vertices: [f32; 9] = [-0.7, -0.7, 0.0, 0.7, -0.7, 0.0, 0.0, 0.7, 0.0];
-            vertices.iter_mut().for_each(|point|{*point = *point * factor;});
-            let vertices = vertices;
+            let f = Rc::new(RefCell::new(None));
+            let g = f.clone();
+            let mut i = 0;
+            *g.borrow_mut() = Some(Closure::new(move || {
+                context.use_program(Some(&program));
 
-            let position_attribute_location = context.get_attrib_location(&program, "position");
-            let buffer = context
-                .create_buffer()
-                .ok_or("Failed to create buffer")
-                .unwrap();
-            context.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
+                let factor = (i % 1000) as f32 / 1000.0;
+                let mut vertices: [f32; 9] = [-0.7, -0.7, 0.0, 0.7, -0.7, 0.0, 0.0, 0.7, 0.0];
+                vertices.iter_mut().for_each(|v| *v = *v * factor);
+                let vertices = vertices;
+                i = i + 1;
 
-            // Note that `Float32Array::view` is somewhat dangerous (hence the
-            // `unsafe`!). This is creating a raw view into our module's
-            // `WebAssembly.Memory` buffer, but if we allocate more pages for ourself
-            // (aka do a memory allocation in Rust) it'll cause the buffer to change,
-            // causing the `Float32Array` to be invalid.
-            //
-            // As a result, after `Float32Array::view` we have to be very careful not to
-            // do any memory allocations before it's dropped.
-            unsafe {
-                let positions_array_buf_view = js_sys::Float32Array::view(&vertices);
+                let position_attribute_location = context.get_attrib_location(&program, "position");
+                let buffer = context
+                    .create_buffer()
+                    .ok_or("Failed to create buffer")
+                    .unwrap();
+                context.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
 
-                context.buffer_data_with_array_buffer_view(
-                    WebGl2RenderingContext::ARRAY_BUFFER,
-                    &positions_array_buf_view,
-                    WebGl2RenderingContext::STATIC_DRAW,
+                // Note that `Float32Array::view` is somewhat dangerous (hence the
+                // `unsafe`!). This is creating a raw view into our module's
+                // `WebAssembly.Memory` buffer, but if we allocate more pages for ourself
+                // (aka do a memory allocation in Rust) it'll cause the buffer to change,
+                // causing the `Float32Array` to be invalid.
+                //
+                // As a result, after `Float32Array::view` we have to be very careful not to
+                // do any memory allocations before it's dropped.
+                unsafe {
+                    let positions_array_buf_view = js_sys::Float32Array::view(&vertices);
+
+                    context.buffer_data_with_array_buffer_view(
+                        WebGl2RenderingContext::ARRAY_BUFFER,
+                        &positions_array_buf_view,
+                        WebGl2RenderingContext::STATIC_DRAW,
+                    );
+                }
+
+                let vao = context
+                    .create_vertex_array()
+                    .ok_or("Could not create vertex array object")
+                    .unwrap();
+                context.bind_vertex_array(Some(&vao));
+
+                context.vertex_attrib_pointer_with_i32(
+                    position_attribute_location as u32,
+                    3,
+                    WebGl2RenderingContext::FLOAT,
+                    false,
+                    0,
+                    0,
                 );
-            }
+                context.enable_vertex_attrib_array(position_attribute_location as u32);
 
-            let vao = context
-                .create_vertex_array()
-                .ok_or("Could not create vertex array object")
-                .unwrap();
-            context.bind_vertex_array(Some(&vao));
+                context.bind_vertex_array(Some(&vao));
 
-            context.vertex_attrib_pointer_with_i32(
-                position_attribute_location as u32,
-                3,
-                WebGl2RenderingContext::FLOAT,
-                false,
-                0,
-                0,
-            );
-            context.enable_vertex_attrib_array(position_attribute_location as u32);
-
-            context.bind_vertex_array(Some(&vao));
-
-            let vert_count = (vertices.len() / 3) as i32;
-            draw(&context, vert_count);
+                let vert_count = (vertices.len() / 3) as i32;
+                draw(&context, vert_count);
+                window()
+                    .request_animation_frame(
+                        (f.borrow().as_ref().unwrap() as &Closure<dyn FnMut()>)
+                            .as_ref()
+                            .unchecked_ref(),
+                    )
+                    .expect("requestAnimationFrame failed");
+            }));
+            console::log_1(&"LOOOOOOG".into());
+            window()
+                .request_animation_frame(
+                    (g.borrow().as_ref().unwrap() as &Closure<dyn FnMut()>)
+                        .as_ref()
+                        .unchecked_ref(),
+                )
+                .expect("requestAnimationFrame failed");
         }
-        console::log_1(&"LOOOOOG".into());
     });
 
-    view! {
-        <button on:click=move |_| {
-            *set_count.write() += 1;
-        }>"Click me: " {count}</button>
-        <canvas node_ref=canvas_ref />
-    }
+    view! { <canvas node_ref=canvas_ref /> }
 }
 
 fn draw(context: &WebGl2RenderingContext, vert_count: i32) {
