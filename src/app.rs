@@ -55,6 +55,32 @@ pub fn App() -> impl IntoView {
             let f = Rc::new(RefCell::new(None));
             let g = f.clone();
             let mut i = 0;
+
+            let position_attribute_location = context.get_attrib_location(&program, "position");
+            let buffer = context
+                .create_buffer()
+                .ok_or("Failed to create buffer")
+                .unwrap();
+            context.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
+
+            let vao = context
+                .create_vertex_array()
+                .ok_or("Could not create vertex array object")
+                .unwrap();
+            context.bind_vertex_array(Some(&vao));
+
+            context.vertex_attrib_pointer_with_i32(
+                position_attribute_location as u32,
+                3,
+                WebGl2RenderingContext::FLOAT,
+                false,
+                0,
+                0,
+            );
+            context.enable_vertex_attrib_array(position_attribute_location as u32);
+
+            context.bind_vertex_array(Some(&vao));
+
             *g.borrow_mut() = Some(Closure::new(move || {
                 context.use_program(Some(&program));
 
@@ -63,13 +89,6 @@ pub fn App() -> impl IntoView {
                 vertices.iter_mut().for_each(|v| *v = *v * factor);
                 let vertices = vertices;
                 i = i + 1;
-
-                let position_attribute_location = context.get_attrib_location(&program, "position");
-                let buffer = context
-                    .create_buffer()
-                    .ok_or("Failed to create buffer")
-                    .unwrap();
-                context.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
 
                 // Note that `Float32Array::view` is somewhat dangerous (hence the
                 // `unsafe`!). This is creating a raw view into our module's
@@ -88,24 +107,6 @@ pub fn App() -> impl IntoView {
                         WebGl2RenderingContext::STATIC_DRAW,
                     );
                 }
-
-                let vao = context
-                    .create_vertex_array()
-                    .ok_or("Could not create vertex array object")
-                    .unwrap();
-                context.bind_vertex_array(Some(&vao));
-
-                context.vertex_attrib_pointer_with_i32(
-                    position_attribute_location as u32,
-                    3,
-                    WebGl2RenderingContext::FLOAT,
-                    false,
-                    0,
-                    0,
-                );
-                context.enable_vertex_attrib_array(position_attribute_location as u32);
-
-                context.bind_vertex_array(Some(&vao));
 
                 let vert_count = (vertices.len() / 3) as i32;
                 draw(&context, vert_count);
