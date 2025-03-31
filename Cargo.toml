@@ -15,5 +15,8 @@ features = [
     "WebGlBuffer",
     "WebGlVertexArrayObject",
     "WebGlShader",
+    "WebGlTexture",
+    "WebGlFramebuffer",
+    "WebGlUniformLocation",
     "WebGlProgram"
 ]

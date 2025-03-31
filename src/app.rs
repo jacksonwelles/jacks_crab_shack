@@ -1,19 +1,19 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use leptos::html::Canvas;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::prelude::*;
 
-use web_sys::console;
 use web_sys::js_sys;
 use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader};
+
+type GL = WebGl2RenderingContext;
 
 #[component]
 pub fn App() -> impl IntoView {
     let canvas_ref = NodeRef::<Canvas>::new();
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
+            canvas.set_width(480);
+            canvas.set_height(480);
             let context = canvas
                 .get_context("webgl2")
                 .expect("get_context")
@@ -24,20 +24,22 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    view! { <canvas node_ref=canvas_ref /> }
+    view! { <canvas node_ref=canvas_ref />  }
 }
 
 fn canvas_fill(context: WebGl2RenderingContext) {
     let vert_shader = compile_shader(
         &context,
-        WebGl2RenderingContext::VERTEX_SHADER,
-        r##"#version 300 es
+        GL::VERTEX_SHADER,
+        r##"
+        attribute vec4 a_position;
+        attribute vec2 a_texcoord;
 
-        in vec4 position;
+        varying vec2 u_texcoord;
 
         void main() {
-        
-            gl_Position = position;
+            gl_Position = a_position;
+            u_texcoord = a_texcoord;
         }
         "##,
     )
@@ -45,101 +47,122 @@ fn canvas_fill(context: WebGl2RenderingContext) {
 
     let frag_shader = compile_shader(
         &context,
-        WebGl2RenderingContext::FRAGMENT_SHADER,
-        r##"#version 300 es
-
-        precision highp float;
-        out vec4 outColor;
+        GL::FRAGMENT_SHADER,
+        r##"
+        precision mediump float;
+        
+        varying vec2 u_texcoord;
+        uniform sampler2D u_texture;
         
         void main() {
-            outColor = vec4(1, 1, 1, 1);
+            gl_FragColor = texture2D(u_texture, u_texcoord);
         }
         "##,
     )
     .unwrap();
     let program = link_program(&context, &vert_shader, &frag_shader).unwrap();
 
-    let f = Rc::new(RefCell::new(None));
-    let g = f.clone();
-    let mut i = 0;
+    let position_attribute_location = context.get_attrib_location(&program, "a_position") as u32;
+    let texcoord_attribute_location = context.get_attrib_location(&program, "a_texcoord") as u32;
+    let texture_uniform_location = context.get_uniform_location(&program, "u_texture");
 
-    let position_attribute_location = context.get_attrib_location(&program, "position");
-    let buffer = context
-        .create_buffer()
-        .ok_or("Failed to create buffer")
-        .unwrap();
-    context.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
+    let position_buffer = context.create_buffer();
+    context.bind_buffer(GL::ARRAY_BUFFER, position_buffer.as_ref());
+    set_geometry(&context);
 
-    let vao = context
-        .create_vertex_array()
-        .ok_or("Could not create vertex array object")
-        .unwrap();
-    context.bind_vertex_array(Some(&vao));
+    let texcoord_buffer = context.create_buffer();
+    context.bind_buffer(GL::ARRAY_BUFFER, texcoord_buffer.as_ref());
+    set_texcoords(&context);
 
-    context.vertex_attrib_pointer_with_i32(
-        position_attribute_location as u32,
-        3,
-        WebGl2RenderingContext::FLOAT,
-        false,
-        0,
-        0,
-    );
-    context.enable_vertex_attrib_array(position_attribute_location as u32);
+    let base_texture = context.create_texture();
+    context.bind_texture(GL::TEXTURE_2D, base_texture.as_ref());
+    set_base_texture(&context);
 
-    context.bind_vertex_array(Some(&vao));
+    let vao = context.create_vertex_array();
+    context.bind_vertex_array(vao.as_ref());
 
-    *g.borrow_mut() = Some(Closure::new(move || {
-        context.use_program(Some(&program));
+    context.use_program(Some(&program));
 
-        let factor = (i % 1000) as f32 / 1000.0;
-        let mut vertices: [f32; 9] = [-0.7, -0.7, 0.0, 0.7, -0.7, 0.0, 0.0, 0.7, 0.0];
-        vertices.iter_mut().for_each(|v| *v = *v * factor);
-        let vertices = vertices;
-        i = i + 1;
+    context.enable_vertex_attrib_array(position_attribute_location);
+    context.bind_buffer(GL::ARRAY_BUFFER, position_buffer.as_ref());
 
-        // Note that `Float32Array::view` is somewhat dangerous (hence the
-        // `unsafe`!). This is creating a raw view into our module's
-        // `WebAssembly.Memory` buffer, but if we allocate more pages for ourself
-        // (aka do a memory allocation in Rust) it'll cause the buffer to change,
-        // causing the `Float32Array` to be invalid.
-        //
-        // As a result, after `Float32Array::view` we have to be very careful not to
-        // do any memory allocations before it's dropped.
-        unsafe {
-            let positions_array_buf_view = js_sys::Float32Array::view(&vertices);
+    context.vertex_attrib_pointer_with_i32(position_attribute_location, 3, GL::FLOAT, false, 0, 0);
 
-            context.buffer_data_with_array_buffer_view(
-                WebGl2RenderingContext::ARRAY_BUFFER,
-                &positions_array_buf_view,
-                WebGl2RenderingContext::STATIC_DRAW,
-            );
-        }
+    context.enable_vertex_attrib_array(texcoord_attribute_location);
+    context.bind_buffer(GL::ARRAY_BUFFER, texcoord_buffer.as_ref());
 
-        let vert_count = (vertices.len() / 3) as i32;
-        draw(&context, vert_count);
-        window()
-            .request_animation_frame(
-                (f.borrow().as_ref().unwrap() as &Closure<dyn FnMut()>)
-                    .as_ref()
-                    .unchecked_ref(),
-            )
-            .expect("requestAnimationFrame failed");
-    }));
-    console::log_1(&"LOOOOOOG".into());
-    window()
-        .request_animation_frame(
-            (g.borrow().as_ref().unwrap() as &Closure<dyn FnMut()>)
-                .as_ref()
-                .unchecked_ref(),
+    context.vertex_attrib_pointer_with_i32(texcoord_attribute_location, 2, GL::FLOAT, false, 0, 0);
+
+    context.bind_texture(GL::TEXTURE_2D, base_texture.as_ref());
+    context.uniform1i(texture_uniform_location.as_ref(), 0);
+
+    draw(&context, 6);
+}
+
+fn set_geometry(context: &WebGl2RenderingContext) {
+    let quad_vertices: [f32; 18] = [
+        -1.0, -1.0, 0.0, -1.0, 1.0, 0.0, 1.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, 1.0, 0.0, 1.0, -1.0,
+        0.0,
+    ];
+
+    // we cannot allocate any new memory between view
+    unsafe {
+        let quad_verts_view = js_sys::Float32Array::view(&quad_vertices);
+
+        context.buffer_data_with_array_buffer_view(
+            GL::ARRAY_BUFFER,
+            &quad_verts_view,
+            GL::STATIC_DRAW,
+        );
+    }
+}
+
+fn set_texcoords(context: &WebGl2RenderingContext) {
+    let quad_texture_coords: [f32; 12] =
+        [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
+
+    unsafe {
+        let quad_coords_view = js_sys::Float32Array::view(&quad_texture_coords);
+
+        context.buffer_data_with_array_buffer_view(
+            GL::ARRAY_BUFFER,
+            &quad_coords_view,
+            GL::STATIC_DRAW,
+        );
+    }
+}
+
+fn set_base_texture(context: &WebGl2RenderingContext) {
+    let texture_data: [u8; 6] = [128, 64, 128, 0, 192, 0];
+
+    context.pixel_storei(GL::UNPACK_ALIGNMENT, 1);
+
+    context
+        .tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_u8_array_and_src_offset(
+            GL::TEXTURE_2D,
+            0,
+            GL::LUMINANCE as i32,
+            3,
+            2,
+            0,
+            GL::LUMINANCE,
+            GL::UNSIGNED_BYTE,
+            &texture_data,
+            0,
         )
-        .expect("requestAnimationFrame failed");
+        .expect("failed to create texture");
+
+    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, GL::NEAREST as i32);
+    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MAG_FILTER, GL::NEAREST as i32);
+    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_S, GL::CLAMP_TO_EDGE as i32);
+    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_T, GL::CLAMP_TO_EDGE as i32);
 }
 
 fn draw(context: &WebGl2RenderingContext, vert_count: i32) {
     context.clear_color(0.0, 0.0, 0.0, 1.0);
-    context.clear(WebGl2RenderingContext::COLOR_BUFFER_BIT);
+    context.clear(GL::COLOR_BUFFER_BIT);
 
-    context.draw_arrays(WebGl2RenderingContext::TRIANGLES, 0, vert_count);
+    context.draw_arrays(GL::TRIANGLES, 0, vert_count);
 }
 
 pub fn compile_shader(
@@ -154,7 +177,7 @@ pub fn compile_shader(
     context.compile_shader(&shader);
 
     if context
-        .get_shader_parameter(&shader, WebGl2RenderingContext::COMPILE_STATUS)
+        .get_shader_parameter(&shader, GL::COMPILE_STATUS)
         .as_bool()
         .unwrap_or(false)
     {
@@ -180,7 +203,7 @@ pub fn link_program(
     context.link_program(&program);
 
     if context
-        .get_program_parameter(&program, WebGl2RenderingContext::LINK_STATUS)
+        .get_program_parameter(&program, GL::LINK_STATUS)
         .as_bool()
         .unwrap_or(false)
     {
