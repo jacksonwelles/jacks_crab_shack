@@ -10,18 +10,18 @@ use web_sys::{WebGlFramebuffer, WebGlTexture, js_sys};
 
 type GL = WebGl2RenderingContext;
 
-struct SwappableTexture<'a> {
-    context: &'a WebGl2RenderingContext,
+struct SwappableTexture {
+    context: WebGl2RenderingContext,
     a_texture: Option<WebGlTexture>,
     b_texture: Option<WebGlTexture>,
     a_framebuff: Option<WebGlFramebuffer>,
     b_framebuff: Option<WebGlFramebuffer>,
-    use_a: bool,
+    from_a: bool,
 }
 
-impl<'a> SwappableTexture<'a> {
+impl SwappableTexture {
     fn create(
-        context: &'a WebGl2RenderingContext,
+        context: WebGl2RenderingContext,
         target: u32,
         level: i32,
         internal_format: u32,
@@ -82,14 +82,14 @@ impl<'a> SwappableTexture<'a> {
             b_texture,
             a_framebuff,
             b_framebuff,
-            use_a: false,
+            from_a: true,
         }
     }
 
-    fn bind_source(&self) {
+    fn bind_tex(&self) {
         self.context.bind_texture(
             GL::TEXTURE_2D,
-            if self.use_a {
+            if self.from_a {
                 self.a_texture.as_ref()
             } else {
                 self.b_texture.as_ref()
@@ -97,10 +97,10 @@ impl<'a> SwappableTexture<'a> {
         );
     }
 
-    fn bind_target(&self) {
+    fn bind_fb(&self) {
         self.context.bind_framebuffer(
             GL::FRAMEBUFFER,
-            if self.use_a {
+            if self.from_a {
                 self.b_framebuff.as_ref()
             } else {
                 self.a_framebuff.as_ref()
@@ -108,17 +108,17 @@ impl<'a> SwappableTexture<'a> {
         );
     }
 
-    fn bind(&self) {
-        self.bind_source();
-        self.bind_target();
+    fn bind_all(&self) {
+        self.bind_tex();
+        self.bind_fb();
     }
 
     fn swap(&mut self) {
-        self.use_a = !self.use_a;
+        self.from_a = !self.from_a;
     }
 }
 
-impl Drop for SwappableTexture<'_> {
+impl Drop for SwappableTexture {
     fn drop(&mut self) {
         self.context.delete_framebuffer(self.b_framebuff.as_ref());
         self.context.delete_framebuffer(self.a_framebuff.as_ref());
@@ -234,33 +234,7 @@ fn canvas_fill(context: WebGl2RenderingContext) {
     context.bind_buffer(GL::ARRAY_BUFFER, texcoord_buffer.as_ref());
     set_texcoords(&context);
 
-    let base_texture = context.create_texture();
-    context.bind_texture(GL::TEXTURE_2D, base_texture.as_ref());
-    set_base_texture(&context);
-
-    let swap_texture = context.create_texture();
-    context.bind_texture(GL::TEXTURE_2D, swap_texture.as_ref());
-    make_empty_texture(&context);
-
-    let base_framebuffer = context.create_framebuffer();
-    context.bind_framebuffer(GL::FRAMEBUFFER, base_framebuffer.as_ref());
-    context.framebuffer_texture_2d(
-        GL::FRAMEBUFFER,
-        GL::COLOR_ATTACHMENT0,
-        GL::TEXTURE_2D,
-        base_texture.as_ref(),
-        0,
-    );
-
-    let swap_framebuffer = context.create_framebuffer();
-    context.bind_framebuffer(GL::FRAMEBUFFER, swap_framebuffer.as_ref());
-    context.framebuffer_texture_2d(
-        GL::FRAMEBUFFER,
-        GL::COLOR_ATTACHMENT0,
-        GL::TEXTURE_2D,
-        swap_texture.as_ref(),
-        0,
-    );
+    let mut swap_texture = make_swap_texture(context.clone());
 
     let vao = context.create_vertex_array();
     context.bind_vertex_array(vao.as_ref());
@@ -297,23 +271,25 @@ fn canvas_fill(context: WebGl2RenderingContext) {
             prev_time = Some(now);
 
             context.use_program(Some(&quad_program));
+            swap_texture.bind_tex();
             context.bind_framebuffer(GL::FRAMEBUFFER, None);
-            context.bind_texture(GL::TEXTURE_2D, base_texture.as_ref());
             context.viewport(0, 0, 512, 512);
             draw(&context, 6);
 
             context.use_program(Some(&life_program));
-            context.bind_framebuffer(GL::FRAMEBUFFER, swap_framebuffer.as_ref());
-            context.bind_texture(GL::TEXTURE_2D, base_texture.as_ref());
+            swap_texture.bind_fb();
             context.viewport(0, 0, 32, 32);
             draw(&context, 6);
+
+            swap_texture.swap();
 
             context.use_program(Some(&quad_program));
-            context.bind_framebuffer(GL::FRAMEBUFFER, base_framebuffer.as_ref());
-            context.bind_texture(GL::TEXTURE_2D, swap_texture.as_ref());
+            swap_texture.bind_all();
             context.viewport(0, 0, 32, 32);
 
             draw(&context, 6);
+
+            swap_texture.swap();
         }
 
         window()
@@ -367,7 +343,7 @@ fn set_texcoords(context: &WebGl2RenderingContext) {
     }
 }
 
-fn set_base_texture(context: &WebGl2RenderingContext) {
+fn make_swap_texture(context: WebGl2RenderingContext) -> SwappableTexture {
     let mut texture_data: [u8; 4096] = [0; 4096];
 
     for (i, elem) in texture_data.iter_mut().enumerate() {
@@ -386,48 +362,24 @@ fn set_base_texture(context: &WebGl2RenderingContext) {
         *elem = 255;
     }
 
-    context.pixel_storei(GL::UNPACK_ALIGNMENT, 1);
-
-    context
-        .tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_u8_array_and_src_offset(
-            GL::TEXTURE_2D,
-            0,
-            GL::RGBA as i32,
-            32,
-            32,
-            0,
-            GL::RGBA,
-            GL::UNSIGNED_BYTE,
-            &texture_data,
-            0,
-        )
-        .expect("failed to create texture");
-
-    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, GL::NEAREST as i32);
-    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MAG_FILTER, GL::NEAREST as i32);
-    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_S, GL::REPEAT as i32);
-    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_T, GL::REPEAT as i32);
-}
-
-fn make_empty_texture(context: &WebGl2RenderingContext) {
-    context
-        .tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_array_buffer_view(
-            GL::TEXTURE_2D,
-            0,
-            GL::RGBA as i32,
-            32,
-            32,
-            0,
-            GL::RGBA,
-            GL::UNSIGNED_BYTE,
-            None,
-        )
-        .expect("failed to create texture");
-
-    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, GL::NEAREST as i32);
-    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MAG_FILTER, GL::NEAREST as i32);
-    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_S, GL::REPEAT as i32);
-    context.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_T, GL::REPEAT as i32);
+    return SwappableTexture::create(
+        context,
+        GL::TEXTURE_2D,
+        0,
+        GL::RGBA,
+        32,
+        32,
+        0,
+        GL::RGBA,
+        GL::UNSIGNED_BYTE,
+        Some(&texture_data),
+        &[
+            (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
+            (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
+            (GL::TEXTURE_WRAP_S, GL::REPEAT),
+            (GL::TEXTURE_WRAP_T, GL::REPEAT),
+        ],
+    );
 }
 
 fn draw(context: &WebGl2RenderingContext, vert_count: i32) {
