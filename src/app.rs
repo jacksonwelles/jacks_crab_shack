@@ -5,10 +5,127 @@ use leptos::html::Canvas;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::prelude::*;
 
-use web_sys::js_sys;
 use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader};
+use web_sys::{WebGlFramebuffer, WebGlTexture, js_sys};
 
 type GL = WebGl2RenderingContext;
+
+struct SwappableTexture<'a> {
+    context: &'a WebGl2RenderingContext,
+    a_texture: Option<WebGlTexture>,
+    b_texture: Option<WebGlTexture>,
+    a_framebuff: Option<WebGlFramebuffer>,
+    b_framebuff: Option<WebGlFramebuffer>,
+    use_a: bool,
+}
+
+impl<'a> SwappableTexture<'a> {
+    fn create(
+        context: &'a WebGl2RenderingContext,
+        target: u32,
+        level: i32,
+        internal_format: u32,
+        width: i32,
+        height: i32,
+        border: i32,
+        format: u32,
+        data_type: u32,
+        src_data: Option<&[u8]>,
+        tex_params: &[(u32, u32)],
+    ) -> Self {
+        let make_texture = |use_data: bool| {
+            let texture = context.create_texture();
+            context.bind_texture(GL::TEXTURE_2D, texture.as_ref());
+            if use_data {
+                context.pixel_storei(GL::UNPACK_ALIGNMENT, 1);
+            }
+            context
+                .tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+                    target,
+                    level,
+                    internal_format as i32,
+                    width,
+                    height,
+                    border,
+                    format,
+                    data_type,
+                    if use_data { src_data } else { None },
+                )
+                .expect("failed to create texture");
+
+            for (key, value) in tex_params {
+                context.tex_parameteri(GL::TEXTURE_2D, *key, *value as i32);
+            }
+            texture
+        };
+        let make_framebuffer = |texture: &Option<WebGlTexture>| {
+            let framebuffer = context.create_framebuffer();
+            context.bind_framebuffer(GL::FRAMEBUFFER, framebuffer.as_ref());
+            context.framebuffer_texture_2d(
+                GL::FRAMEBUFFER,
+                GL::COLOR_ATTACHMENT0,
+                GL::TEXTURE_2D,
+                texture.as_ref(),
+                0,
+            );
+            framebuffer
+        };
+        let a_texture = make_texture(true);
+        let b_texture = make_texture(false);
+
+        let a_framebuff = make_framebuffer(&a_texture);
+        let b_framebuff = make_framebuffer(&b_texture);
+
+        SwappableTexture {
+            context,
+            a_texture,
+            b_texture,
+            a_framebuff,
+            b_framebuff,
+            use_a: false,
+        }
+    }
+
+    fn bind_source(&self) {
+        self.context.bind_texture(
+            GL::TEXTURE_2D,
+            if self.use_a {
+                self.a_texture.as_ref()
+            } else {
+                self.b_texture.as_ref()
+            },
+        );
+    }
+
+    fn bind_target(&self) {
+        self.context.bind_framebuffer(
+            GL::FRAMEBUFFER,
+            if self.use_a {
+                self.b_framebuff.as_ref()
+            } else {
+                self.a_framebuff.as_ref()
+            },
+        );
+    }
+
+    fn bind(&self) {
+        self.bind_source();
+        self.bind_target();
+    }
+
+    fn swap(&mut self) {
+        self.use_a = !self.use_a;
+    }
+}
+
+impl Drop for SwappableTexture<'_> {
+    fn drop(&mut self) {
+        self.context.delete_framebuffer(self.b_framebuff.as_ref());
+        self.context.delete_framebuffer(self.a_framebuff.as_ref());
+        self.context.delete_texture(self.a_texture.as_ref());
+        self.context.delete_texture(self.b_texture.as_ref());
+    }
+}
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -53,10 +170,10 @@ fn canvas_fill(context: WebGl2RenderingContext) {
         GL::FRAGMENT_SHADER,
         r##"
         precision mediump float;
-        
+
         varying vec2 v_texcoord;
         uniform sampler2D u_texture;
-        
+
         void main() {
             gl_FragColor = texture2D(u_texture, v_texcoord);
         }
@@ -64,7 +181,7 @@ fn canvas_fill(context: WebGl2RenderingContext) {
     )
     .unwrap();
 
-    let life_frag_shader = compile_shader(&context, GL::FRAGMENT_SHADER, 
+    let life_frag_shader = compile_shader(&context, GL::FRAGMENT_SHADER,
     r##"
         precision mediump float;
 
@@ -93,7 +210,7 @@ fn canvas_fill(context: WebGl2RenderingContext) {
             }
             // if (alive) {
             //     gl_FragColor = vec4(1,1,1,1);
-            // } 
+            // }
             // gl_FragColor = texture2D(u_texture, v_texcoord);
         }
     "##).unwrap();
@@ -127,12 +244,24 @@ fn canvas_fill(context: WebGl2RenderingContext) {
 
     let base_framebuffer = context.create_framebuffer();
     context.bind_framebuffer(GL::FRAMEBUFFER, base_framebuffer.as_ref());
-    context.framebuffer_texture_2d(GL::FRAMEBUFFER, GL::COLOR_ATTACHMENT0, GL::TEXTURE_2D, base_texture.as_ref(), 0);
+    context.framebuffer_texture_2d(
+        GL::FRAMEBUFFER,
+        GL::COLOR_ATTACHMENT0,
+        GL::TEXTURE_2D,
+        base_texture.as_ref(),
+        0,
+    );
 
     let swap_framebuffer = context.create_framebuffer();
     context.bind_framebuffer(GL::FRAMEBUFFER, swap_framebuffer.as_ref());
-    context.framebuffer_texture_2d(GL::FRAMEBUFFER, GL::COLOR_ATTACHMENT0, GL::TEXTURE_2D, swap_texture.as_ref(), 0);
-    
+    context.framebuffer_texture_2d(
+        GL::FRAMEBUFFER,
+        GL::COLOR_ATTACHMENT0,
+        GL::TEXTURE_2D,
+        swap_texture.as_ref(),
+        0,
+    );
+
     let vao = context.create_vertex_array();
     context.bind_vertex_array(vao.as_ref());
 
@@ -142,17 +271,16 @@ fn canvas_fill(context: WebGl2RenderingContext) {
     context.enable_vertex_attrib_array(life_position_location);
     context.vertex_attrib_pointer_with_i32(life_position_location, 3, GL::FLOAT, false, 0, 0);
 
-
     context.bind_buffer(GL::ARRAY_BUFFER, texcoord_buffer.as_ref());
     context.enable_vertex_attrib_array(quad_texcoord_location);
     context.vertex_attrib_pointer_with_i32(quad_texcoord_location, 2, GL::FLOAT, false, 0, 0);
     context.enable_vertex_attrib_array(life_texcoord_location);
     context.vertex_attrib_pointer_with_i32(life_texcoord_location, 2, GL::FLOAT, false, 0, 0);
-    
+
     context.use_program(Some(&life_program));
 
     context.uniform1i(life_texture_location.as_ref(), 0);
-    context.uniform1f(life_texel_size_location.as_ref(), 1.0/32.0);
+    context.uniform1f(life_texel_size_location.as_ref(), 1.0 / 32.0);
 
     context.use_program(Some(&quad_program));
 
@@ -167,7 +295,7 @@ fn canvas_fill(context: WebGl2RenderingContext) {
         let now = window().performance().unwrap().now();
         if !prev_time.is_some() || now - prev_time.unwrap() > 50.0 {
             prev_time = Some(now);
-        
+
             context.use_program(Some(&quad_program));
             context.bind_framebuffer(GL::FRAMEBUFFER, None);
             context.bind_texture(GL::TEXTURE_2D, base_texture.as_ref());
@@ -246,7 +374,7 @@ fn set_base_texture(context: &WebGl2RenderingContext) {
         *elem = (i % 4 == 3) as u8 * 255;
     }
 
-    for  elem in texture_data[1332..1344].iter_mut() {
+    for elem in texture_data[1332..1344].iter_mut() {
         *elem = 255;
     }
 
@@ -257,7 +385,6 @@ fn set_base_texture(context: &WebGl2RenderingContext) {
     for elem in texture_data[1080..1084].iter_mut() {
         *elem = 255;
     }
-
 
     context.pixel_storei(GL::UNPACK_ALIGNMENT, 1);
 
