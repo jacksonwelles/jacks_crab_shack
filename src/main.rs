@@ -1,6 +1,7 @@
-mod app;
+mod life;
+mod common;
 
 fn main() {
     console_error_panic_hook::set_once();
-    leptos::mount::mount_to_body(app::App);
+    leptos::mount::mount_to_body(life::App);
 }
