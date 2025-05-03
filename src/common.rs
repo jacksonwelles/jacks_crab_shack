@@ -21,7 +21,7 @@ pub struct BufferedTexture {
 
 impl BufferedTexture {
     pub fn create(
-        context: WebGl2RenderingContext,
+        context: &WebGl2RenderingContext,
         target: u32,
         level: i32,
         internal_format: u32,
@@ -64,8 +64,8 @@ impl BufferedTexture {
             texture.as_ref(),
             0,
         );
-        return BufferedTexture {
-            context,
+        BufferedTexture {
+            context: context.clone(),
             texture,
             framebuffer,
             width,
@@ -74,10 +74,10 @@ impl BufferedTexture {
                 x: 1.0 / width as f32,
                 y: 1.0 / height as f32,
             },
-        };
+        }
     }
 
-    pub fn texel_size(&self) -> & TexelSize {
+    pub fn texel_size(&self) -> &TexelSize {
         &self.texel_size
     }
 
@@ -119,7 +119,7 @@ impl SwappableTexture {
     ) -> Self {
         SwappableTexture {
             first: BufferedTexture::create(
-                context.clone(),
+                context,
                 target,
                 level,
                 internal_format,
@@ -132,7 +132,7 @@ impl SwappableTexture {
                 tex_params,
             ),
             second: BufferedTexture::create(
-                context.clone(),
+                context,
                 target,
                 level,
                 internal_format,
