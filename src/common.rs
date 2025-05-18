@@ -10,6 +10,47 @@ pub struct TexelSize {
     pub x: f32,
     pub y: f32,
 }
+
+pub trait JsView {
+    unsafe fn to_js_obj(&self)-> js_sys::Object;
+}
+
+pub struct ArrayView<'a, T> {
+    data: &'a [T],
+}
+
+impl<'a, T> ArrayView<'a, T> {
+    pub fn create(data: &'a [T]) -> ArrayView<'a, T> {
+        ArrayView { data }
+    }
+}
+
+impl JsView for ArrayView<'_, f32> {
+    unsafe fn to_js_obj(&self) -> js_sys::Object {
+        unsafe {
+            // wasm memory is one big block that can get resized
+            // whenever an alloc happens, this view takes a raw
+            // pointer into our wasm memory, so we must be careful
+            // not to alloc between taking this pointer and giving
+            // it to the js api
+            js_sys::Float32Array::view(self.data).into()
+        }
+    }
+}
+
+impl JsView for ArrayView<'_, u8> {
+    unsafe fn to_js_obj(&self) -> js_sys::Object {
+        unsafe {
+            // wasm memory is one big block that can get resized
+            // whenever an alloc happens, this view takes a raw
+            // pointer into our wasm memory, so we must be careful
+            // not to alloc between taking this pointer and giving
+            // it to the js api
+            js_sys::Uint8Array::view(self.data).into()
+        }
+    }
+}
+
 pub struct BufferedTexture {
     context: WebGl2RenderingContext,
     texture: Option<WebGlTexture>,
@@ -19,8 +60,9 @@ pub struct BufferedTexture {
     texel_size: TexelSize,
 }
 
+
 impl BufferedTexture {
-    pub fn create(
+    pub fn create<T: JsView>(
         context: &WebGl2RenderingContext,
         target: u32,
         level: i32,
@@ -30,16 +72,15 @@ impl BufferedTexture {
         border: i32,
         format: u32,
         data_type: u32,
-        src_data: Option<&[u8]>,
+        src_data: Option<T>,
         tex_params: &[(u32, u32)],
     ) -> Self {
         let texture = context.create_texture();
         context.bind_texture(GL::TEXTURE_2D, texture.as_ref());
-        if src_data.is_some() {
-            context.pixel_storei(GL::UNPACK_ALIGNMENT, 1);
-        }
-        context
-            .tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+
+        unsafe {
+            context
+            .tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_array_buffer_view(
                 target,
                 level,
                 internal_format as i32,
@@ -48,9 +89,10 @@ impl BufferedTexture {
                 border,
                 format,
                 data_type,
-                src_data,
+                src_data.map(|view|view.to_js_obj()).as_ref(),
             )
             .expect("failed to create texture");
+        }
 
         for (key, value) in tex_params {
             context.tex_parameteri(GL::TEXTURE_2D, *key, *value as i32);
@@ -104,7 +146,7 @@ pub struct SwappableTexture {
 
 impl SwappableTexture {
     const START: bool = true;
-    pub fn create(
+    pub fn create<T: JsView>(
         context: &WebGl2RenderingContext,
         target: u32,
         level: i32,
@@ -114,7 +156,7 @@ impl SwappableTexture {
         border: i32,
         format: u32,
         data_type: u32,
-        src_data: Option<&[u8]>,
+        src_data: Option<T>,
         tex_params: &[(u32, u32)],
     ) -> Self {
         SwappableTexture {
@@ -141,7 +183,7 @@ impl SwappableTexture {
                 border,
                 format,
                 data_type,
-                None,
+                None::<T>,
                 tex_params,
             ),
             parity: Self::START,

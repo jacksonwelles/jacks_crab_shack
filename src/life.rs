@@ -35,67 +35,23 @@ fn canvas_fill(context: WebGl2RenderingContext) {
     let quad_vert_shader = compile_shader(
         &context,
         GL::VERTEX_SHADER,
-        r##"
-        attribute vec2 a_position;
-        varying vec2 v_texcoord;
-
-        void main() {
-            gl_Position = vec4(a_position, 0.0, 1.0);
-            v_texcoord = a_position * 0.5 + 0.5;
-        }
-        "##,
+        include_str!("shaders/quad.vert"),
     )
     .unwrap();
 
     let quad_frag_shader = compile_shader(
         &context,
         GL::FRAGMENT_SHADER,
-        r##"
-        precision mediump float;
-
-        varying vec2 v_texcoord;
-        uniform sampler2D u_texture;
-
-        void main() {
-            gl_FragColor = texture2D(u_texture, v_texcoord);
-        }
-        "##,
+        include_str!("shaders/quad.frag"),
     )
     .unwrap();
 
-    let life_frag_shader = compile_shader(&context, GL::FRAGMENT_SHADER,
-    r##"
-        precision mediump float;
-
-        varying vec2 v_texcoord;
-        uniform sampler2D u_texture;
-        uniform vec2 u_texel_size;
-
-        void main() {
-            int sum = 0;
-            bool alive = texture2D(u_texture, v_texcoord).r > 0.0;
-            gl_FragColor = vec4(0,0,0,1);
-            sum += int(texture2D(u_texture, v_texcoord + vec2( 0              , u_texel_size.y  )).r > 0.0);
-            sum += int(texture2D(u_texture, v_texcoord + vec2( u_texel_size.x , u_texel_size.y  )).r > 0.0);
-            sum += int(texture2D(u_texture, v_texcoord + vec2( u_texel_size.x , 0               )).r > 0.0);
-            sum += int(texture2D(u_texture, v_texcoord + vec2( u_texel_size.x , -u_texel_size.y )).r > 0.0);
-            sum += int(texture2D(u_texture, v_texcoord + vec2( 0              , -u_texel_size.y )).r > 0.0);
-            sum += int(texture2D(u_texture, v_texcoord + vec2( -u_texel_size.x, -u_texel_size.y )).r > 0.0);
-            sum += int(texture2D(u_texture, v_texcoord + vec2( -u_texel_size.x, 0               )).r > 0.0);
-            sum += int(texture2D(u_texture, v_texcoord + vec2( -u_texel_size.x, u_texel_size.y  )).r > 0.0);
-            if (alive) {
-                if (sum == 2 || sum == 3) {
-                    gl_FragColor = vec4(1,1,1,0);
-                }
-            } else if (sum == 3) {
-                gl_FragColor = vec4(1,1,1,0);
-            }
-            // if (alive) {
-            //     gl_FragColor = vec4(1,1,1,1);
-            // }
-            // gl_FragColor = texture2D(u_texture, v_texcoord);
-        }
-    "##).unwrap();
+    let life_frag_shader = compile_shader(
+        &context,
+        GL::FRAGMENT_SHADER,
+        include_str!("shaders/life.frag"),
+    )
+    .unwrap();
     let quad_program = Program::create(&context, &quad_vert_shader, &quad_frag_shader);
     let life_program = Program::create(&context, &quad_vert_shader, &life_frag_shader);
 
@@ -180,7 +136,7 @@ fn make_game_board(context: &WebGl2RenderingContext) -> SwappableTexture {
         0,
         GL::RGBA,
         GL::UNSIGNED_BYTE,
-        Some(&texture_data),
+        Some(ArrayView::create(&texture_data)),
         &[
             (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
             (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
