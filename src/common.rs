@@ -15,13 +15,27 @@ pub trait JsView {
     unsafe fn to_js_obj(&self) -> js_sys::Object;
 }
 
+pub trait JsViewMut: JsView {
+    unsafe fn to_mut_js_obj(&mut self) -> js_sys::Object;
+}
+
 pub struct ArrayView<'a, T> {
     data: &'a [T],
+}
+
+pub struct ArrayViewMut<'a, T> {
+    data: &'a mut [T],
 }
 
 impl<'a, T> ArrayView<'a, T> {
     pub fn create(data: &'a [T]) -> ArrayView<'a, T> {
         ArrayView { data }
+    }
+}
+
+impl<'a, T> ArrayViewMut<'a, T> {
+    pub fn create(data: &'a mut [T]) -> ArrayViewMut<'a, T> {
+        ArrayViewMut { data }
     }
 }
 
@@ -48,6 +62,20 @@ impl JsView for ArrayView<'_, u8> {
             // it to the js api
             js_sys::Uint8Array::view(self.data).into()
         }
+    }
+}
+
+impl JsViewMut for ArrayViewMut<'_, f32> {
+    unsafe fn to_mut_js_obj(&mut self) -> js_sys::Object {
+        unsafe {
+            js_sys::Float32Array::view_mut_raw(self.data.as_mut_ptr(), self.data.len()).into()
+        }
+    }
+}
+
+impl JsView for ArrayViewMut<'_, f32> {
+    unsafe fn to_js_obj(&self) -> js_sys::Object {
+        unsafe { js_sys::Float32Array::view(self.data).into() }
     }
 }
 
@@ -118,6 +146,14 @@ impl BufferedTexture {
                 y: 1.0 / height as f32,
             },
         }
+    }
+
+    pub fn width(&self) -> i32 {
+        self.width
+    }
+
+    pub fn height(&self) -> i32 {
+        self.height
     }
 
     pub fn texel_size(&self) -> &TexelSize {
@@ -343,15 +379,18 @@ impl Quad {
     }
 
     pub fn blit(&self, target: Option<&BufferedTexture>) {
-        self.context.bind_buffer(GL::ARRAY_BUFFER, self.buff.as_ref());
+        self.context
+            .bind_buffer(GL::ARRAY_BUFFER, self.buff.as_ref());
 
-        self.context.vertex_attrib_pointer_with_i32(0, 2, GL::FLOAT, false, 0, 0);
+        self.context
+            .vertex_attrib_pointer_with_i32(0, 2, GL::FLOAT, false, 0, 0);
         self.context.enable_vertex_attrib_array(0);
 
         match target {
             Some(tex) => {
                 self.context.viewport(0, 0, tex.width, tex.height);
-                self.context.bind_framebuffer(GL::FRAMEBUFFER, tex.framebuffer.as_ref());
+                self.context
+                    .bind_framebuffer(GL::FRAMEBUFFER, tex.framebuffer.as_ref());
             }
             None => {
                 self.context.viewport(

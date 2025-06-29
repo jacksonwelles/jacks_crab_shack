@@ -99,29 +99,19 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
     )
     .unwrap();
 
-    let force_program = Program::create(&context, &quad_vert_shader, &force_frag_shader);
-    let quad_program = Program::create(&context, &quad_vert_shader, &quad_frag_shader);
-    let advect_program = Program::create(&context, &quad_vert_shader, &advect_frag_shader);
-    let boundary_program = Program::create(&context, &quad_vert_shader, &boundary_frag_shader);
-    let divergence_program = Program::create(&context, &quad_vert_shader, &divergence_frag_shader);
-    let gradient_program = Program::create(&context, &quad_vert_shader, &gradient_frag_shader);
-    let jacobi_program = Program::create(&context, &quad_vert_shader, &jacobi_frag_shader);
-
-    let boundary = make_boundary_offsets(&context);
-    let temp_texture = make_temp_texture(&context);
-    let mut pressure = make_pressure_texture(&context);
-    let mut velocity = make_initial_velocity(&context);
-    let mut dye = make_initial_dye(&context);
-
-    let f = Rc::new(RefCell::new(None));
-    let g = f.clone();
-
+    let sim_w = 64;
+    let sim_h = 64;
+    let dye_w = 512;
+    let dye_h = 512;
+    let force_radius = 1.0/24.0;
+    let force_scale = 7.0;
     let timescale = 1.0;
     let viscosity = 0.5;
+    let sim_texel_size = (1.0 / sim_w as f32, 1.0 / sim_h as f32);
     let diffusion_alpha = (
-        1.0.div(velocity.texel_size().x.powi(2))
+        1.0.div(sim_texel_size.0.powi(2))
             .div(viscosity * timescale),
-        1.0.div(velocity.texel_size().y.powi(2))
+        1.0.div(sim_texel_size.1.powi(2))
             .div(viscosity * timescale),
     );
     let diffusion_beta = (
@@ -130,11 +120,29 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
     );
 
     let pressure_alpha = (
-        -1.0.div(velocity.texel_size().x.powi(2)),
-        -1.0.div(velocity.texel_size().y.powi(2)),
+        -1.0.div(sim_texel_size.0.powi(2)),
+        -1.0.div(sim_texel_size.1.powi(2)),
     );
 
     let pressure_beta = (0.25f32, 0.25f32);
+
+    let force_program = Program::create(&context, &quad_vert_shader, &force_frag_shader);
+    let quad_program = Program::create(&context, &quad_vert_shader, &quad_frag_shader);
+    let advect_program = Program::create(&context, &quad_vert_shader, &advect_frag_shader);
+    let boundary_program = Program::create(&context, &quad_vert_shader, &boundary_frag_shader);
+    let divergence_program = Program::create(&context, &quad_vert_shader, &divergence_frag_shader);
+    let gradient_program = Program::create(&context, &quad_vert_shader, &gradient_frag_shader);
+    let jacobi_program = Program::create(&context, &quad_vert_shader, &jacobi_frag_shader);
+
+    let boundary = make_boundary_offsets(sim_w, sim_h, &context);
+    let temp_texture = make_temp_texture(sim_w, sim_h,&context);
+    let mut pressure = make_pressure_texture(sim_w, sim_h,&context);
+    let mut velocity = make_initial_velocity(sim_w, sim_h,&context);
+    let mut dye = make_initial_dye(dye_w, dye_h, &context);
+
+    let f = Rc::new(RefCell::new(None));
+    let g = f.clone();
+
     let mut prev_mouse = (0.0, 1.0);
 
     let quad = Quad::create(&context);
@@ -224,8 +232,8 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
 
         // Add impulse
         let cur_mouse = (
-            mouse.x.get_untracked() / 512.0,
-            1.0 - mouse.y.get_untracked() / 512.0,
+            mouse.x.get_untracked() / dye_w as f64,
+            1.0 - mouse.y.get_untracked() /  dye_h as f64,
         );
 
         context.use_program(Some(force_program.program()));
@@ -239,8 +247,8 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             (cur_mouse.0 - prev_mouse.0) as f32,
             (cur_mouse.1 - prev_mouse.1) as f32,
         );
-        context.uniform1f(force_program.uniforms().get("u_radius"), 1.0 / 24.0);
-        context.uniform1f(force_program.uniforms().get("u_scale"), 7.0);
+        context.uniform1f(force_program.uniforms().get("u_radius"), force_radius);
+        context.uniform1f(force_program.uniforms().get("u_scale"), force_scale);
         context.uniform1i(
             force_program.uniforms().get("u_velocity"),
             velocity.read().attach(0),
@@ -294,8 +302,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
                 .into(),
             velocity.read().attach(0),
         );
-        quad.blit(Some(pressure.write()));
-        pressure.swap();
+        quad.blit(Some(&temp_texture));
 
         // Compute Pressure
         context.use_program(Some(boundary_program.program()));
@@ -303,8 +310,11 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             boundary_program.uniforms().get("u_scale").unwrap().into(),
             1.0,
         );
-
-        temp_texture.copy_from(pressure.read()).unwrap();
+        context.uniform2f(
+            boundary_program.uniforms().get("u_texel_size").unwrap().into(),
+            pressure.texel_size().x,
+            pressure.texel_size().y,
+        );
 
         context.use_program(Some(jacobi_program.program()));
         context.uniform2f(
@@ -317,8 +327,14 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             pressure_beta.0,
             pressure_beta.1,
         );
+        context.uniform2f(
+            jacobi_program.uniforms().get("u_texel_size").unwrap().into(),
+            pressure.texel_size().x,
+            pressure.texel_size().y,
+        );
 
         for _ in 0..40{
+            console::log_1(&"Boundary:".into());
             context.use_program(Some(boundary_program.program()));
             context.uniform1i(
                 boundary_program.uniforms().get("u_target").unwrap().into(),
@@ -335,6 +351,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             quad.blit(Some(pressure.write()));
             pressure.swap();
 
+            console::log_1(&"Jacobi:".into());
             context.use_program(Some(jacobi_program.program()));
             context.uniform1i(
                 jacobi_program.uniforms().get("u_initial").unwrap().into(),
@@ -427,18 +444,22 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         .expect("requestAnimationFrame failed");
 }
 
-fn make_temp_texture(context: &WebGl2RenderingContext) -> BufferedTexture {
+fn make_temp_texture(width: usize, height: usize, context: &WebGl2RenderingContext) -> BufferedTexture {
+    const VALUES_PER_PIXEL: usize = 2;
+    let tex_data_size = width as usize * height as usize * VALUES_PER_PIXEL;
+    let texture_data =vec![0.0; tex_data_size];
+
     BufferedTexture::create(
         &context,
         GL::TEXTURE_2D,
         0,
         GL::RG32F,
-        128,
-        128,
+        width as i32,
+        height as i32,
         0,
         GL::RG,
         GL::FLOAT,
-        None::<ArrayView<f32>>,
+        Some(ArrayView::create(&texture_data)),
         &[
             (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
             (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
@@ -448,18 +469,22 @@ fn make_temp_texture(context: &WebGl2RenderingContext) -> BufferedTexture {
     )
 }
 
-fn make_pressure_texture(context: &WebGl2RenderingContext) -> SwappableTexture {
+fn make_pressure_texture(width: usize, height: usize, context: &WebGl2RenderingContext) -> SwappableTexture {
+    const VALUES_PER_PIXEL: usize = 2;
+    let tex_data_size = width as usize * height as usize * VALUES_PER_PIXEL;
+    let texture_data =vec![0.0; tex_data_size];
+
     SwappableTexture::create(
         &context,
         GL::TEXTURE_2D,
         0,
         GL::RG32F,
-        128,
-        128,
+        width as i32,
+        height as i32,
         0,
         GL::RG,
         GL::FLOAT,
-        None::<ArrayView<f32>>,
+        Some(ArrayView::create(&texture_data)),
         &[
             (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
             (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
@@ -469,23 +494,21 @@ fn make_pressure_texture(context: &WebGl2RenderingContext) -> SwappableTexture {
     )
 }
 
-fn make_boundary_offsets(context: &WebGl2RenderingContext) -> BufferedTexture {
-    const WIDTH: usize = 128;
-    const HEIGHT: usize = 128;
+fn make_boundary_offsets(width: usize, height: usize, context: &WebGl2RenderingContext) -> BufferedTexture {
     const VALUES_PER_PIXEL: usize = 2;
-    const TEX_DATA_SIZE: usize = WIDTH * HEIGHT * VALUES_PER_PIXEL;
-    let mut texture_data: [f32; TEX_DATA_SIZE] = [0.0; TEX_DATA_SIZE];
+    let tex_data_size = width as usize * height as usize * VALUES_PER_PIXEL;
+    let mut texture_data = vec![0.0; tex_data_size];
 
     for (i, elem) in texture_data.iter_mut().enumerate() {
         let pos = i % VALUES_PER_PIXEL;
         let pixel = i / VALUES_PER_PIXEL;
-        let row = pixel / WIDTH;
-        let col = pixel % WIDTH;
+        let row = pixel / width;
+        let col = pixel % width;
         *elem = match (pos, row, col) {
             (0, .., 0) => 1.0,
-            (0, .., x) if x == WIDTH - 1 => -1.0,
+            (0, .., x) if x == width - 1 => -1.0,
             (1, 0, ..) => 1.0,
-            (1, y, ..) if y == HEIGHT - 1 => -1.0,
+            (1, y, ..) if y == height - 1 => -1.0,
             _ => 0.0,
         }
     }
@@ -495,8 +518,8 @@ fn make_boundary_offsets(context: &WebGl2RenderingContext) -> BufferedTexture {
         GL::TEXTURE_2D,
         0,
         GL::RG32F,
-        WIDTH as i32,
-        HEIGHT as i32,
+        width as i32,
+        height as i32,
         0,
         GL::RG,
         GL::FLOAT,
@@ -510,25 +533,21 @@ fn make_boundary_offsets(context: &WebGl2RenderingContext) -> BufferedTexture {
     );
 }
 
-fn make_initial_dye(context: &WebGl2RenderingContext) -> SwappableTexture {
-    const WIDTH: usize = 512;
-    const HEIGHT: usize = 512;
+fn make_initial_dye(width: usize, height: usize, context: &WebGl2RenderingContext) -> SwappableTexture {
     const VALUES_PER_PIXEL: usize = 3;
-    const TEX_DATA_SIZE: usize = WIDTH * HEIGHT * VALUES_PER_PIXEL;
-    let mut texture_data: [u8; TEX_DATA_SIZE] = [0; TEX_DATA_SIZE];
+    let tex_data_size = width as usize * height as usize * VALUES_PER_PIXEL;
+    let mut texture_data = vec![0; tex_data_size];
     for (i, elem) in texture_data.iter_mut().enumerate() {
         let pos = i % VALUES_PER_PIXEL;
         let pixel = i / VALUES_PER_PIXEL;
-        let row = pixel / WIDTH;
-        let col = pixel % WIDTH;
+        let row = pixel / width;
+        let col = pixel % width;
         let dist = ((row as f32 - 256.0).powi(2) + (col as f32 - 256.0).powi(2)).sqrt();
-        if dist < 128.0 {
-            *elem = (match pos {
-                1 => (128.0 - dist) / 128.0,
-                2 => 1.0,
-                _ => 0.0,
-            } * 255.0) as u8;
-        }
+        *elem = (match pos {
+            1 if dist < 128.0 => (128.0 - dist) / 128.0,
+            2 if dist < 128.0 => 1.0,
+            _ => 0.0,
+        } * 255.0) as u8;
     }
 
     return SwappableTexture::create(
@@ -536,8 +555,8 @@ fn make_initial_dye(context: &WebGl2RenderingContext) -> SwappableTexture {
         GL::TEXTURE_2D,
         0,
         GL::RGB,
-        WIDTH as i32,
-        HEIGHT as i32,
+        width as i32,
+        height as i32,
         0,
         GL::RGB,
         GL::UNSIGNED_BYTE,
@@ -551,20 +570,18 @@ fn make_initial_dye(context: &WebGl2RenderingContext) -> SwappableTexture {
     );
 }
 
-fn make_initial_velocity(context: &WebGl2RenderingContext) -> SwappableTexture {
-    const WIDTH: usize = 128;
-    const HEIGHT: usize = 128;
+fn make_initial_velocity(width: usize, height: usize, context: &WebGl2RenderingContext) -> SwappableTexture {
     const VALUES_PER_PIXEL: usize = 2;
-    const TEX_DATA_SIZE: usize = WIDTH * HEIGHT * VALUES_PER_PIXEL;
-    let texture_data: [f32; TEX_DATA_SIZE] = [0.0; TEX_DATA_SIZE];
+    let tex_data_size = width as usize * height as usize * VALUES_PER_PIXEL;
+    let texture_data =vec![0.0; tex_data_size];
 
     return SwappableTexture::create(
         context,
         GL::TEXTURE_2D,
         0,
         GL::RG32F,
-        WIDTH as i32,
-        HEIGHT as i32,
+        width as i32,
+        height as i32,
         0,
         GL::RG,
         GL::FLOAT,
