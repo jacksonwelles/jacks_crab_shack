@@ -1,5 +1,3 @@
-use leptos::prelude::*;
-
 use std::collections::HashMap;
 
 use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader, WebGlUniformLocation};
@@ -12,7 +10,7 @@ pub struct TexelSize {
 }
 
 pub trait JsView {
-    unsafe fn to_js_obj(&self)-> js_sys::Object;
+    unsafe fn to_js_obj(&self) -> js_sys::Object;
 }
 
 pub struct ArrayView<'a, T> {
@@ -55,11 +53,11 @@ pub struct BufferedTexture {
     context: WebGl2RenderingContext,
     texture: Option<WebGlTexture>,
     framebuffer: Option<WebGlFramebuffer>,
+    internal_format: u32,
     width: i32,
     height: i32,
     texel_size: TexelSize,
 }
-
 
 impl BufferedTexture {
     pub fn create<T: JsView>(
@@ -110,6 +108,7 @@ impl BufferedTexture {
             context: context.clone(),
             texture,
             framebuffer,
+            internal_format,
             width,
             height,
             texel_size: TexelSize {
@@ -128,6 +127,29 @@ impl BufferedTexture {
         self.context
             .bind_texture(GL::TEXTURE_2D, self.texture.as_ref());
         id
+    }
+
+    pub fn copy_from(&self, other: &BufferedTexture) -> Result<(), &str> {
+        if self.width != other.width || self.height != other.height {
+            return Err("mismatched sizes");
+        }
+        if self.internal_format != other.internal_format {
+            return Err("mismatched formats");
+        }
+        self.context
+            .bind_framebuffer(GL::FRAMEBUFFER, other.framebuffer.as_ref());
+        self.context.bind_texture(GL::TEXTURE_2D, self.texture.as_ref());
+        self.context.copy_tex_image_2d(
+            GL::TEXTURE_2D,
+            0,
+            self.internal_format,
+            0,
+            0,
+            self.width,
+            self.height,
+            0,
+        );
+        Ok(())
     }
 }
 
