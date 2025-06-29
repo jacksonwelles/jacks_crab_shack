@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader, WebGlUniformLocation};
+use web_sys::{
+    WebGl2RenderingContext, WebGlBuffer, WebGlProgram, WebGlShader, WebGlUniformLocation,
+};
 use web_sys::{WebGlFramebuffer, WebGlTexture, js_sys};
 
 type GL = WebGl2RenderingContext;
@@ -138,7 +140,8 @@ impl BufferedTexture {
         }
         self.context
             .bind_framebuffer(GL::FRAMEBUFFER, other.framebuffer.as_ref());
-        self.context.bind_texture(GL::TEXTURE_2D, self.texture.as_ref());
+        self.context
+            .bind_texture(GL::TEXTURE_2D, self.texture.as_ref());
         self.context.copy_tex_image_2d(
             GL::TEXTURE_2D,
             0,
@@ -313,42 +316,63 @@ impl Program {
     }
 }
 
-pub fn blit(context: &WebGl2RenderingContext, target: Option<&BufferedTexture>) {
-    let quad_vertices: [f32; 12] = [
-        -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0,
-    ];
-    context.bind_buffer(GL::ARRAY_BUFFER, context.create_buffer().as_ref());
+pub struct Quad {
+    context: WebGl2RenderingContext,
+    buff: Option<WebGlBuffer>,
+}
 
-    unsafe {
-        let quad_vert_view = js_sys::Float32Array::view(&quad_vertices);
-        context.buffer_data_with_array_buffer_view(
-            GL::ARRAY_BUFFER,
-            &quad_vert_view,
-            GL::STATIC_DRAW,
-        );
-    }
-
-    context.vertex_attrib_pointer_with_i32(0, 2, GL::FLOAT, false, 0, 0);
-    context.enable_vertex_attrib_array(0);
-
-    match target {
-        Some(tex) => {
-            context.viewport(0, 0, tex.width, tex.height);
-            context.bind_framebuffer(GL::FRAMEBUFFER, tex.framebuffer.as_ref());
-        }
-        None => {
-            context.viewport(
-                0,
-                0,
-                context.drawing_buffer_width(),
-                context.drawing_buffer_height(),
+impl Quad {
+    pub fn create(context: &WebGl2RenderingContext) -> Self {
+        let quad_vertices: [f32; 12] = [
+            -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0,
+        ];
+        let buff = context.create_buffer();
+        context.bind_buffer(GL::ARRAY_BUFFER, buff.as_ref());
+        unsafe {
+            let quad_vert_view = js_sys::Float32Array::view(&quad_vertices);
+            context.buffer_data_with_array_buffer_view(
+                GL::ARRAY_BUFFER,
+                &quad_vert_view,
+                GL::STATIC_DRAW,
             );
-            context.bind_framebuffer(GL::FRAMEBUFFER, None);
+        }
+        Quad {
+            context: context.clone(),
+            buff,
         }
     }
 
-    context.clear_color(0.0, 0.0, 0.0, 1.0);
-    context.clear(GL::COLOR_BUFFER_BIT);
+    pub fn blit(&self, target: Option<&BufferedTexture>) {
+        self.context.bind_buffer(GL::ARRAY_BUFFER, self.buff.as_ref());
 
-    context.draw_arrays(GL::TRIANGLES, 0, 6);
+        self.context.vertex_attrib_pointer_with_i32(0, 2, GL::FLOAT, false, 0, 0);
+        self.context.enable_vertex_attrib_array(0);
+
+        match target {
+            Some(tex) => {
+                self.context.viewport(0, 0, tex.width, tex.height);
+                self.context.bind_framebuffer(GL::FRAMEBUFFER, tex.framebuffer.as_ref());
+            }
+            None => {
+                self.context.viewport(
+                    0,
+                    0,
+                    self.context.drawing_buffer_width(),
+                    self.context.drawing_buffer_height(),
+                );
+                self.context.bind_framebuffer(GL::FRAMEBUFFER, None);
+            }
+        }
+
+        self.context.clear_color(0.0, 0.0, 0.0, 1.0);
+        self.context.clear(GL::COLOR_BUFFER_BIT);
+
+        self.context.draw_arrays(GL::TRIANGLES, 0, 6);
+    }
+}
+
+impl Drop for Quad {
+    fn drop(&mut self) {
+        self.context.delete_buffer(self.buff.as_ref());
+    }
 }

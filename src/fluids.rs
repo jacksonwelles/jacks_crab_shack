@@ -1,10 +1,7 @@
 use super::common::*;
 
 use std::cell::RefCell;
-use std::f64::consts::PI;
-use std::ops::Add;
 use std::ops::Div;
-use std::ops::Mul;
 use std::rc::Rc;
 
 use leptos::html::Canvas;
@@ -133,12 +130,14 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
     );
 
     let pressure_alpha = (
-        -1.0.mul(1.0.div(velocity.texel_size().x.powi(2))),
-        -1.0.mul(1.0.div(velocity.texel_size().y.powi(2))),
+        -1.0.div(velocity.texel_size().x.powi(2)),
+        -1.0.div(velocity.texel_size().y.powi(2)),
     );
 
     let pressure_beta = (0.25f32, 0.25f32);
-    let mut prev_mouse = (0.0, 0.0);
+    let mut prev_mouse = (0.0, 1.0);
+
+    let quad = Quad::create(&context);
 
     *g.borrow_mut() = Some(Closure::new(move || {
         // Compute Boundary
@@ -168,7 +167,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             velocity.texel_size().x,
             velocity.texel_size().y,
         );
-        blit(&context, Some(velocity.write()));
+        quad.blit(Some(velocity.write()));
         velocity.swap();
 
         // Advect Velocity
@@ -194,7 +193,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             advect_program.uniforms().get("u_velocity").unwrap().into(),
             velocity.read().attach(1),
         );
-        blit(&context, Some(velocity.write()));
+        quad.blit(Some(velocity.write()));
         velocity.swap();
 
         // Advect Dye
@@ -220,7 +219,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             advect_program.uniforms().get("u_timestep").unwrap().into(),
             timescale,
         );
-        blit(&context, Some(dye.write()));
+        quad.blit(Some(dye.write()));
         dye.swap();
 
         // Add impulse
@@ -228,6 +227,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             mouse.x.get_untracked() / 512.0,
             1.0 - mouse.y.get_untracked() / 512.0,
         );
+
         context.use_program(Some(force_program.program()));
         context.uniform2f(
             force_program.uniforms().get("u_location").unwrap().into(),
@@ -237,40 +237,43 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         context.uniform2f(
             force_program.uniforms().get("u_direction").unwrap().into(),
             (cur_mouse.0 - prev_mouse.0) as f32,
-            (cur_mouse.1 - prev_mouse.1) as f32
+            (cur_mouse.1 - prev_mouse.1) as f32,
         );
-        context.uniform1f(force_program.uniforms().get("u_radius"), 1.0/24.0);
-        context.uniform1f(force_program.uniforms().get("u_scale"), 700.0);
-        context.uniform1i(force_program.uniforms().get("u_velocity"), velocity.read().attach(0));
-        blit(&context, Some(velocity.write()));
+        context.uniform1f(force_program.uniforms().get("u_radius"), 1.0 / 24.0);
+        context.uniform1f(force_program.uniforms().get("u_scale"), 7.0);
+        context.uniform1i(
+            force_program.uniforms().get("u_velocity"),
+            velocity.read().attach(0),
+        );
+        quad.blit( Some(velocity.write()));
         velocity.swap();
         prev_mouse = cur_mouse;
 
         // Diffuse
-        // context.use_program(Some(jacobi_program.program()));
-        // temp_texture.copy_from(velocity.read()).unwrap();
-        // context.uniform2f(
-        //     jacobi_program.uniforms().get("u_alpha").unwrap().into(),
-        //     diffusion_alpha.0,
-        //     diffusion_alpha.1,
-        // );
-        // context.uniform2f(
-        //     jacobi_program.uniforms().get("u_r_beta").unwrap().into(),
-        //     diffusion_beta.0,
-        //     diffusion_beta.1,
-        // );
-        // context.uniform1i(
-        //     jacobi_program.uniforms().get("u_initial").unwrap().into(),
-        //     temp_texture.attach(0),
-        // );
-        // for _ in [0..30] {
-        //     context.uniform1i(
-        //         jacobi_program.uniforms().get("u_solution").unwrap().into(),
-        //         velocity.read().attach(1),
-        //     );
-        //     blit(&context, Some(velocity.write()));
-        //     velocity.swap();
-        // }
+        context.use_program(Some(jacobi_program.program()));
+        temp_texture.copy_from(velocity.read()).unwrap();
+        context.uniform2f(
+            jacobi_program.uniforms().get("u_alpha").unwrap().into(),
+            diffusion_alpha.0,
+            diffusion_alpha.1,
+        );
+        context.uniform2f(
+            jacobi_program.uniforms().get("u_r_beta").unwrap().into(),
+            diffusion_beta.0,
+            diffusion_beta.1,
+        );
+        context.uniform1i(
+            jacobi_program.uniforms().get("u_initial").unwrap().into(),
+            temp_texture.attach(0),
+        );
+        for _ in [0..30] {
+            context.uniform1i(
+                jacobi_program.uniforms().get("u_solution").unwrap().into(),
+                velocity.read().attach(1),
+            );
+            quad.blit( Some(velocity.write()));
+            velocity.swap();
+        }
 
         // Compute Divergance
         context.use_program(Some(divergence_program.program()));
@@ -291,7 +294,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
                 .into(),
             velocity.read().attach(0),
         );
-        blit(&context, Some(pressure.write()));
+        quad.blit(Some(pressure.write()));
         pressure.swap();
 
         // Compute Pressure
@@ -315,7 +318,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             pressure_beta.1,
         );
 
-        for _ in [0..40] {
+        for _ in 0..40{
             context.use_program(Some(boundary_program.program()));
             context.uniform1i(
                 boundary_program.uniforms().get("u_target").unwrap().into(),
@@ -329,19 +332,20 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
                     .into(),
                 boundary.attach(1),
             );
-            blit(&context, Some(pressure.write()));
+            quad.blit(Some(pressure.write()));
             pressure.swap();
 
             context.use_program(Some(jacobi_program.program()));
             context.uniform1i(
                 jacobi_program.uniforms().get("u_initial").unwrap().into(),
-                temp_texture.attach(0),
+                temp_texture.attach(1),
             );
+
             context.uniform1i(
                 jacobi_program.uniforms().get("u_solution").unwrap().into(),
-                pressure.read().attach(1),
+                pressure.read().attach(0),
             );
-            blit(&context, Some(pressure.write()));
+            quad.blit(Some(pressure.write()));
             pressure.swap();
         }
 
@@ -363,7 +367,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
                 .into(),
             boundary.attach(1),
         );
-        blit(&context, Some(velocity.write()));
+        quad.blit(Some(velocity.write()));
         velocity.swap();
 
         // Gradient Subtraction
@@ -393,7 +397,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
                 .into(),
             pressure.read().attach(1),
         );
-        blit(&context, Some(velocity.write()));
+        quad.blit(Some(velocity.write()));
         velocity.swap();
 
         // draw the dye
@@ -403,7 +407,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             dye.read().attach(0),
         );
 
-        blit(&context, None);
+        quad.blit(None);
 
         window()
             .request_animation_frame(
@@ -428,16 +432,16 @@ fn make_temp_texture(context: &WebGl2RenderingContext) -> BufferedTexture {
         &context,
         GL::TEXTURE_2D,
         0,
-        GL::RG16F,
-        32,
-        32,
+        GL::RG32F,
+        128,
+        128,
         0,
         GL::RG,
         GL::FLOAT,
         None::<ArrayView<f32>>,
         &[
-            (GL::TEXTURE_MIN_FILTER, GL::LINEAR),
-            (GL::TEXTURE_MAG_FILTER, GL::LINEAR),
+            (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
+            (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
             (GL::TEXTURE_WRAP_S, GL::CLAMP_TO_EDGE),
             (GL::TEXTURE_WRAP_T, GL::CLAMP_TO_EDGE),
         ],
@@ -449,16 +453,16 @@ fn make_pressure_texture(context: &WebGl2RenderingContext) -> SwappableTexture {
         &context,
         GL::TEXTURE_2D,
         0,
-        GL::RG16F,
-        32,
-        32,
+        GL::RG32F,
+        128,
+        128,
         0,
         GL::RG,
         GL::FLOAT,
         None::<ArrayView<f32>>,
         &[
-            (GL::TEXTURE_MIN_FILTER, GL::LINEAR),
-            (GL::TEXTURE_MAG_FILTER, GL::LINEAR),
+            (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
+            (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
             (GL::TEXTURE_WRAP_S, GL::CLAMP_TO_EDGE),
             (GL::TEXTURE_WRAP_T, GL::CLAMP_TO_EDGE),
         ],
@@ -466,8 +470,8 @@ fn make_pressure_texture(context: &WebGl2RenderingContext) -> SwappableTexture {
 }
 
 fn make_boundary_offsets(context: &WebGl2RenderingContext) -> BufferedTexture {
-    const WIDTH: usize = 32;
-    const HEIGHT: usize = 32;
+    const WIDTH: usize = 128;
+    const HEIGHT: usize = 128;
     const VALUES_PER_PIXEL: usize = 2;
     const TEX_DATA_SIZE: usize = WIDTH * HEIGHT * VALUES_PER_PIXEL;
     let mut texture_data: [f32; TEX_DATA_SIZE] = [0.0; TEX_DATA_SIZE];
@@ -490,7 +494,7 @@ fn make_boundary_offsets(context: &WebGl2RenderingContext) -> BufferedTexture {
         context,
         GL::TEXTURE_2D,
         0,
-        GL::RG16F,
+        GL::RG32F,
         WIDTH as i32,
         HEIGHT as i32,
         0,
@@ -507,17 +511,23 @@ fn make_boundary_offsets(context: &WebGl2RenderingContext) -> BufferedTexture {
 }
 
 fn make_initial_dye(context: &WebGl2RenderingContext) -> SwappableTexture {
-    const WIDTH: usize = 256;
-    const HEIGHT: usize = 256;
+    const WIDTH: usize = 512;
+    const HEIGHT: usize = 512;
     const VALUES_PER_PIXEL: usize = 3;
     const TEX_DATA_SIZE: usize = WIDTH * HEIGHT * VALUES_PER_PIXEL;
-    const TEX_FREQUENCY: f64 = (10.0 * PI) / WIDTH as f64;
     let mut texture_data: [u8; TEX_DATA_SIZE] = [0; TEX_DATA_SIZE];
     for (i, elem) in texture_data.iter_mut().enumerate() {
         let pos = i % VALUES_PER_PIXEL;
         let pixel = i / VALUES_PER_PIXEL;
-        if pos == 2 {
-            *elem = (pixel as f64).mul(TEX_FREQUENCY).sin().add(1.0).mul(128.0) as u8;
+        let row = pixel / WIDTH;
+        let col = pixel % WIDTH;
+        let dist = ((row as f32 - 256.0).powi(2) + (col as f32 - 256.0).powi(2)).sqrt();
+        if dist < 128.0 {
+            *elem = (match pos {
+                1 => (128.0 - dist) / 128.0,
+                2 => 1.0,
+                _ => 0.0,
+            } * 255.0) as u8;
         }
     }
 
@@ -535,31 +545,24 @@ fn make_initial_dye(context: &WebGl2RenderingContext) -> SwappableTexture {
         &[
             (GL::TEXTURE_MIN_FILTER, GL::LINEAR),
             (GL::TEXTURE_MAG_FILTER, GL::LINEAR),
-            (GL::TEXTURE_WRAP_S, GL::REPEAT),
+            (GL::TEXTURE_WRAP_S, GL::CLAMP_TO_EDGE),
             (GL::TEXTURE_WRAP_T, GL::CLAMP_TO_EDGE),
         ],
     );
 }
 
 fn make_initial_velocity(context: &WebGl2RenderingContext) -> SwappableTexture {
-    const WIDTH: usize = 32;
-    const HEIGHT: usize = 32;
+    const WIDTH: usize = 128;
+    const HEIGHT: usize = 128;
     const VALUES_PER_PIXEL: usize = 2;
     const TEX_DATA_SIZE: usize = WIDTH * HEIGHT * VALUES_PER_PIXEL;
     let texture_data: [f32; TEX_DATA_SIZE] = [0.0; TEX_DATA_SIZE];
-
-    // for (i, elem) in texture_data.iter_mut().enumerate() {
-    //     let pos = i % VALUES_PER_PIXEL;
-    //     if pos == 0 {
-    //         *elem = 1.0
-    //     }
-    // }
 
     return SwappableTexture::create(
         context,
         GL::TEXTURE_2D,
         0,
-        GL::RG16F,
+        GL::RG32F,
         WIDTH as i32,
         HEIGHT as i32,
         0,
