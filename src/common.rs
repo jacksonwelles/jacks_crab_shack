@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use web_sys::{
     WebGl2RenderingContext, WebGlBuffer, WebGlProgram, WebGlShader, WebGlUniformLocation,
 };
-use web_sys::{WebGlFramebuffer, WebGlTexture, js_sys};
+use web_sys::{WebGlFramebuffer, WebGlTexture, js_sys, console};
 
 type GL = WebGl2RenderingContext;
 pub struct TexelSize {
@@ -407,6 +407,32 @@ impl Quad {
         self.context.clear(GL::COLOR_BUFFER_BIT);
 
         self.context.draw_arrays(GL::TRIANGLES, 0, 6);
+
+        // if let Some(tex) = target {
+        //     let mut buff = vec![0.0; (tex.width() * tex.height() * 4) as usize];
+        //     unsafe {
+        //         let mut view = ArrayViewMut::create(buff.as_mut_slice());
+        //         self.context
+        //             .read_pixels_with_opt_array_buffer_view(
+        //                 0,
+        //                 0,
+        //                 tex.width(),
+        //                 tex.height(),
+        //                 GL::RGBA,
+        //                 GL::FLOAT,
+        //                 Some(&view.to_mut_js_obj()),
+        //             )
+        //             .unwrap();
+        //     }
+        //     let mut message = String::new();
+        //     for (i, value) in buff.iter().enumerate() {
+        //         if i as i32 % (tex.width() * 4) == 0{
+        //             message.push_str("\n");
+        //         }
+        //         message.push_str(format!("{:8.5},", value).as_str());
+        //     }
+        //     console::log_1(&message.into());
+        // }
     }
 }
 
