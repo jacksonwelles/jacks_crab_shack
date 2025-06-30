@@ -4,7 +4,8 @@ varying vec2 v_texcoord;
 
 uniform sampler2D u_target;
 uniform sampler2D u_velocity;
-uniform vec2 u_texel_size;
+uniform vec2 u_target_texel_size;
+uniform vec2 u_velocity_texel_size;
 uniform float u_timestep;
 
 vec4 tex_bilerp(in sampler2D tex, in vec2 uv, in vec2 tsize) {
@@ -24,7 +25,7 @@ vec4 tex_bilerp(in sampler2D tex, in vec2 uv, in vec2 tsize) {
 void main() {
     vec2 pos =
         v_texcoord -
-        u_timestep * u_texel_size *
-        texture2D(u_velocity, v_texcoord).rg;
-    gl_FragColor = tex_bilerp(u_target, pos, u_texel_size);
+        u_timestep * u_velocity_texel_size *
+        tex_bilerp(u_velocity, v_texcoord, u_velocity_texel_size).rg;
+    gl_FragColor = tex_bilerp(u_target, pos, u_target_texel_size);
 }

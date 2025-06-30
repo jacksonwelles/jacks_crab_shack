@@ -25,8 +25,8 @@ pub fn App() -> impl IntoView {
     let mouse_rc = Rc::new(mouse);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
-            canvas.set_width(256);
-            canvas.set_height(256);
+            canvas.set_width(1024);
+            canvas.set_height(1024);
             let context = canvas
                 .get_context("webgl2")
                 .expect("get_context")
@@ -42,6 +42,7 @@ pub fn App() -> impl IntoView {
 }
 
 fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
+    context.get_extension("EXT_color_buffer_float").unwrap();
     context.get_extension("EXT_color_buffer_float").unwrap();
     let quad_vert_shader = compile_shader(
         &context,
@@ -101,8 +102,8 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
 
     let sim_w = 256;
     let sim_h = 256;
-    let dye_w = 256;
-    let dye_h = 256;
+    let dye_w = context.drawing_buffer_width() as usize;
+    let dye_h = context.drawing_buffer_height() as usize;
     let force_radius = 1.0 / 24.0;
     let force_scale = 7.0;
     let timescale = 1.0;
@@ -199,7 +200,16 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         context.uniform2f(
             advect_program
                 .uniforms()
-                .get("u_texel_size")
+                .get("u_velocity_texel_size")
+                .unwrap()
+                .into(),
+            velocity.texel_size().x,
+            velocity.texel_size().y,
+        );
+        context.uniform2f(
+            advect_program
+                .uniforms()
+                .get("u_target_texel_size")
                 .unwrap()
                 .into(),
             velocity.texel_size().x,
@@ -238,11 +248,20 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         context.uniform2f(
             advect_program
                 .uniforms()
-                .get("u_texel_size")
+                .get("u_target_texel_size")
                 .unwrap()
                 .into(),
             dye.texel_size().x,
             dye.texel_size().y,
+        );
+        context.uniform2f(
+            advect_program
+                .uniforms()
+                .get("u_velocity_texel_size")
+                .unwrap()
+                .into(),
+            velocity.texel_size().x,
+            velocity.texel_size().y,
         );
         context.uniform1f(
             advect_program.uniforms().get("u_timestep").unwrap().into(),
@@ -310,7 +329,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             velocity.texel_size().y,
         );
 
-        for _ in 0..1 {
+        for _ in 0..30 {
             // console::log_1(&"Diffusion".into());
             context.uniform1i(
                 jacobi_program.uniforms().get("u_solution").unwrap().into(),
@@ -383,7 +402,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             pressure.texel_size().y,
         );
 
-        for _ in 0..1 {
+        for _ in 0..40 {
             // console::log_1(&"Boundary:".into());
             context.use_program(Some(boundary_program.program()));
             context.uniform1i(
@@ -602,7 +621,7 @@ fn make_initial_dye(
     height: usize,
     context: &WebGl2RenderingContext,
 ) -> SwappableTexture {
-    const VALUES_PER_PIXEL: usize = 2;
+    const VALUES_PER_PIXEL: usize = 4;
     let tex_data_size = width as usize * height as usize * VALUES_PER_PIXEL;
     let mut texture_data = vec![0.0; tex_data_size];
     for (i, elem) in texture_data.iter_mut().enumerate() {
@@ -615,8 +634,9 @@ fn make_initial_dye(
         let radius = cmp::min(width, height) as f32 / 4.0;
         let dist = ((row as f32 - h_width).powi(2) + (col as f32 - h_height).powi(2)).sqrt();
         *elem = match pos {
-            0 if dist < radius => (radius - dist) / radius,
-            1 if dist < radius => 1.0,
+            1 if dist < radius => (radius - dist) / radius,
+            2 if dist < radius => 1.0,
+            3 => 1.0,
             _ => 0.0,
         } ;
     }
@@ -625,11 +645,11 @@ fn make_initial_dye(
         context,
         GL::TEXTURE_2D,
         0,
-        GL::RG32F,
+        GL::RGBA32F,
         width as i32,
         height as i32,
         0,
-        GL::RG,
+        GL::RGBA,
         GL::FLOAT,
         Some(ArrayView::create(&texture_data)),
         &[
