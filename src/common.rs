@@ -3,39 +3,21 @@ use std::collections::HashMap;
 use web_sys::{
     WebGl2RenderingContext, WebGlBuffer, WebGlProgram, WebGlShader, WebGlUniformLocation,
 };
-use web_sys::{WebGlFramebuffer, WebGlTexture, js_sys, console};
+use web_sys::{WebGlFramebuffer, WebGlTexture, js_sys};
 
 type GL = WebGl2RenderingContext;
-pub struct TexelSize {
-    pub x: f32,
-    pub y: f32,
-}
 
 pub trait JsView {
     unsafe fn to_js_obj(&self) -> js_sys::Object;
-}
-
-pub trait JsViewMut: JsView {
-    unsafe fn to_mut_js_obj(&mut self) -> js_sys::Object;
 }
 
 pub struct ArrayView<'a, T> {
     data: &'a [T],
 }
 
-pub struct ArrayViewMut<'a, T> {
-    data: &'a mut [T],
-}
-
 impl<'a, T> ArrayView<'a, T> {
     pub fn create(data: &'a [T]) -> ArrayView<'a, T> {
         ArrayView { data }
-    }
-}
-
-impl<'a, T> ArrayViewMut<'a, T> {
-    pub fn create(data: &'a mut [T]) -> ArrayViewMut<'a, T> {
-        ArrayViewMut { data }
     }
 }
 
@@ -65,18 +47,20 @@ impl JsView for ArrayView<'_, u8> {
     }
 }
 
-impl JsViewMut for ArrayViewMut<'_, f32> {
-    unsafe fn to_mut_js_obj(&mut self) -> js_sys::Object {
-        unsafe {
-            js_sys::Float32Array::view_mut_raw(self.data.as_mut_ptr(), self.data.len()).into()
-        }
-    }
-}
-
-impl JsView for ArrayViewMut<'_, f32> {
-    unsafe fn to_js_obj(&self) -> js_sys::Object {
-        unsafe { js_sys::Float32Array::view(self.data).into() }
-    }
+pub trait FromJsView {
+    fn create<T: JsView>(
+        context: &WebGl2RenderingContext,
+        target: u32,
+        level: i32,
+        internal_format: u32,
+        width: i32,
+        height: i32,
+        border: i32,
+        format: u32,
+        data_type: u32,
+        src_data: Option<T>,
+        tex_params: &[(u32, u32)],
+    ) -> Self;
 }
 
 pub struct BufferedTexture {
@@ -86,11 +70,11 @@ pub struct BufferedTexture {
     internal_format: u32,
     width: i32,
     height: i32,
-    texel_size: TexelSize,
+    texel_size: (f32, f32),
 }
 
-impl BufferedTexture {
-    pub fn create<T: JsView>(
+impl FromJsView for BufferedTexture {
+    fn create<T: JsView>(
         context: &WebGl2RenderingContext,
         target: u32,
         level: i32,
@@ -141,23 +125,14 @@ impl BufferedTexture {
             internal_format,
             width,
             height,
-            texel_size: TexelSize {
-                x: 1.0 / width as f32,
-                y: 1.0 / height as f32,
-            },
+            texel_size: (1.0 / width as f32, 1.0 / height as f32),
         }
     }
+}
 
-    pub fn width(&self) -> i32 {
-        self.width
-    }
-
-    pub fn height(&self) -> i32 {
-        self.height
-    }
-
-    pub fn texel_size(&self) -> &TexelSize {
-        &self.texel_size
+impl BufferedTexture {
+    pub fn texel_size(&self) -> (f32, f32) {
+        self.texel_size
     }
 
     pub fn attach(&self, id: i32) -> i32 {
@@ -207,7 +182,10 @@ pub struct SwappableTexture {
 
 impl SwappableTexture {
     const START: bool = true;
-    pub fn create<T: JsView>(
+}
+
+impl FromJsView for SwappableTexture {
+    fn create<T: JsView>(
         context: &WebGl2RenderingContext,
         target: u32,
         level: i32,
@@ -250,7 +228,9 @@ impl SwappableTexture {
             parity: Self::START,
         }
     }
+}
 
+impl SwappableTexture {
     pub fn read(&self) -> &BufferedTexture {
         if self.parity == Self::START {
             &self.first
@@ -265,10 +245,6 @@ impl SwappableTexture {
         } else {
             &self.first
         }
-    }
-
-    pub fn texel_size(&self) -> &TexelSize {
-        self.first.texel_size()
     }
 
     pub fn swap(&mut self) {
@@ -407,32 +383,6 @@ impl Quad {
         self.context.clear(GL::COLOR_BUFFER_BIT);
 
         self.context.draw_arrays(GL::TRIANGLES, 0, 6);
-
-        // if let Some(tex) = target {
-        //     let mut buff = vec![0.0; (tex.width() * tex.height() * 4) as usize];
-        //     unsafe {
-        //         let mut view = ArrayViewMut::create(buff.as_mut_slice());
-        //         self.context
-        //             .read_pixels_with_opt_array_buffer_view(
-        //                 0,
-        //                 0,
-        //                 tex.width(),
-        //                 tex.height(),
-        //                 GL::RGBA,
-        //                 GL::FLOAT,
-        //                 Some(&view.to_mut_js_obj()),
-        //             )
-        //             .unwrap();
-        //     }
-        //     let mut message = String::new();
-        //     for (i, value) in buff.iter().enumerate() {
-        //         if i as i32 % (tex.width() * 4) == 0{
-        //             message.push_str("\n");
-        //         }
-        //         message.push_str(format!("{:8.5},", value).as_str());
-        //     }
-        //     console::log_1(&message.into());
-        // }
     }
 }
 
