@@ -35,7 +35,7 @@ pub fn App() -> impl IntoView {
                 .unwrap();
             canvas_fill(context, mouse_rc.clone());
         }
-        // console::log_1(&"Running Main Effect".into());
+        console::log_1(&"Running Main Effect".into());
     });
 
     view! { <canvas node_ref=canvas_ref /> }
@@ -150,16 +150,6 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
     let quad = Quad::create(&context);
 
     *g.borrow_mut() = Some(Closure::new(move || {
-        // if times > 0 {
-        //     window()
-        //         .request_animation_frame(
-        //             (f.borrow().as_ref().unwrap() as &Closure<dyn FnMut()>)
-        //                 .as_ref()
-        //                 .unchecked_ref(),
-        //         )
-        //         .expect("requestAnimationFrame failed");
-        //     return;
-        // }
         // Compute Boundary
         context.use_program(Some(boundary_program.program()));
         context.uniform1f(
@@ -191,7 +181,6 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         velocity.swap();
 
         // Advect Velocity
-        // console::log_1(&"Advection:".into());
         context.use_program(Some(advect_program.program()));
         context.uniform1f(
             advect_program.uniforms().get("u_timestep").unwrap().into(),
@@ -226,16 +215,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         quad.blit(Some(velocity.write()));
         velocity.swap();
 
-        // // Initial Dye
-        // // console::log_1(&"Initial Dye:".into());
-        // context.use_program(Some(quad_program.program()));
-        // context.uniform1i(quad_program.uniforms().get("u_texture").unwrap().into(),
-        //     dye.read().attach(0));
-        // quad.blit(Some(&dye.write()));
-        // dye.swap();
-
         // Advect Dye
-        // console::log_1(&"Advected Dye:".into());
         context.use_program(Some(advect_program.program()));
         context.uniform1i(
             advect_program.uniforms().get("u_target").unwrap().into(),
@@ -273,7 +253,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         // Add impulse
         let cur_mouse = (
             mouse.x.get_untracked() / dye_w as f64,
-            1.0 - mouse.y.get_untracked() /  dye_h as f64,
+            1.0 - mouse.y.get_untracked() / dye_h as f64,
         );
 
         context.use_program(Some(force_program.program()));
@@ -293,7 +273,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             force_program.uniforms().get("u_velocity"),
             velocity.read().attach(0),
         );
-        quad.blit( Some(velocity.write()));
+        quad.blit(Some(velocity.write()));
         velocity.swap();
         prev_mouse = cur_mouse;
 
@@ -330,7 +310,6 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         );
 
         for _ in 0..30 {
-            // console::log_1(&"Diffusion".into());
             context.uniform1i(
                 jacobi_program.uniforms().get("u_solution").unwrap().into(),
                 velocity.read().attach(1),
@@ -340,7 +319,6 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         }
 
         // Compute Divergance
-        // console::log_1(&"Divergance:".into());
         context.use_program(Some(divergence_program.program()));
         context.uniform2f(
             divergence_program
@@ -403,7 +381,6 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         );
 
         for _ in 0..40 {
-            // console::log_1(&"Boundary:".into());
             context.use_program(Some(boundary_program.program()));
             context.uniform1i(
                 boundary_program.uniforms().get("u_target").unwrap().into(),
@@ -420,7 +397,6 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
             quad.blit(Some(pressure.write()));
             pressure.swap();
 
-            // console::log_1(&"Jacobi:".into());
             context.use_program(Some(jacobi_program.program()));
             context.uniform1i(
                 jacobi_program.uniforms().get("u_initial").unwrap().into(),
@@ -436,7 +412,6 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         }
 
         // Reapply Boundaries
-        // console::log_1(&"Velocity Boundary:".into());
         context.use_program(Some(boundary_program.program()));
         context.uniform1f(
             boundary_program.uniforms().get("u_scale").unwrap().into(),
@@ -458,7 +433,6 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         velocity.swap();
 
         // Gradient Subtraction
-        // console::log_1(&"Gradient:".into());
         context.use_program(Some(gradient_program.program()));
         context.uniform2f(
             gradient_program
@@ -638,7 +612,7 @@ fn make_initial_dye(
             2 if dist < radius => 1.0,
             3 => 1.0,
             _ => 0.0,
-        } ;
+        };
     }
 
     return SwappableTexture::create(
@@ -668,11 +642,7 @@ fn make_initial_velocity(
 ) -> SwappableTexture {
     const VALUES_PER_PIXEL: usize = 2;
     let tex_data_size = width as usize * height as usize * VALUES_PER_PIXEL;
-    let mut texture_data = vec![0.0; tex_data_size];
-    // let base = (tex_data_size * 2 - 1) as f32;
-    // for (i, elem) in texture_data.iter_mut().enumerate() {
-    //     *elem = ((i / 2) * 4 + i % 2) as f32 / base;
-    // }
+    let texture_data = vec![0.0; tex_data_size];
 
     return SwappableTexture::create(
         context,
