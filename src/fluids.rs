@@ -11,18 +11,51 @@ use leptos::prelude::*;
 
 use leptos::wasm_bindgen::prelude::*;
 
+use leptos::wasm_bindgen::JsCast;
+use leptos_use::UseMouseEventExtractor;
 use leptos_use::UseMouseReturn;
+use web_sys::HtmlElement;
+use web_sys::MouseEvent;
+use web_sys::Touch;
 use web_sys::WebGl2RenderingContext;
 use web_sys::console;
 
-use leptos_use::{UseMouseOptions, use_mouse_with_options};
+use leptos_use::{UseMouseCoordType, UseMouseOptions, use_mouse_with_options};
 
 type GL = WebGl2RenderingContext;
+#[derive(Clone)]
+struct OffsetExtractor;
+impl UseMouseEventExtractor for OffsetExtractor {
+    fn extract_mouse_coords(&self, event: &MouseEvent) -> Option<(f64, f64)> {
+        match event.buttons() % 2 {
+            1 => Some((event.offset_x() as f64, event.offset_y() as f64)),
+            _ => None,
+        }
+    }
+
+    fn extract_touch_coords(&self, touch: &Touch) -> Option<(f64, f64)> {
+        let element = touch
+            .target()
+            .unwrap()
+            .dyn_ref::<HtmlElement>()
+            .unwrap()
+            .clone();
+        let rect = element.get_bounding_client_rect();
+        Some((
+            touch.client_x() as f64 - rect.x(),
+            touch.client_y() as f64 - rect.y(),
+        ))
+    }
+}
 
 #[component]
 pub fn App() -> impl IntoView {
     let canvas_ref = NodeRef::<Canvas>::new();
-    let mouse = use_mouse_with_options(UseMouseOptions::default().target(canvas_ref));
+    let mouse = use_mouse_with_options(
+        UseMouseOptions::default()
+            .target(canvas_ref)
+            .coord_type(UseMouseCoordType::Custom(OffsetExtractor)),
+    );
     let mouse_rc = Rc::new(mouse);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
@@ -39,9 +72,19 @@ pub fn App() -> impl IntoView {
         console::log_1(&"Running Main Effect".into());
     });
 
-    view! { <canvas node_ref=canvas_ref /> }
+    view! {
+        <h1 style:margin="40px">"WebGl Fluid Sim"</h1>
+        <canvas style:padding="0px" style:touch-action="pinch-zoom" node_ref=canvas_ref />
+        <h2 style:margin="40px">"Written by Jackson Welles"</h2>
+        <h2 style:margin="40px">"Theory and shaders from GPU Gems: Chapter 38."</h2>
+        <h2 style:margin="40px">
+            "Abstractions and WebGL settings from Pavel Dobryakov (PavelDoGreat)"
+        </h2>
+    }
 }
 
+// TODO: These pipeline structs are super generic.
+// There must be a way to make them with macros instead of by hand...
 struct BoundaryPipeline {
     program: Program,
     scale: f32,
@@ -417,7 +460,7 @@ impl JacobiPipeline {
 
 fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
     context.get_extension("EXT_color_buffer_float").unwrap();
-    context.get_extension("EXT_color_buffer_float").unwrap();
+    context.get_extension("OES_texture_float_linear").unwrap();
     let quad_vert_shader = compile_shader(
         &context,
         GL::VERTEX_SHADER,
@@ -474,10 +517,13 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
     )
     .unwrap();
 
-    let sim_w = 256;
-    let sim_h = 256;
-    let dye_w = context.drawing_buffer_width() as usize;
-    let dye_h = context.drawing_buffer_height() as usize;
+    let window_w = context.drawing_buffer_width() as usize;
+    let window_h = context.drawing_buffer_height() as usize;
+    let sim_w = 128;
+    let sim_h = 128;
+    let dye_w = window_w;
+    let dye_h = window_h;
+
     let force_radius = 1.0 / 24.0;
     let force_scale = 7.0;
     let timestep = 1.0;
@@ -525,10 +571,14 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
     let g = f.clone();
 
     let mut prev_mouse: (f32, f32) = (0.0, 1.0);
+    let mut prev_input_time = None::<f64>;
+    let mut prev_frame = None::<f64>;
 
     let quad = Quad::create(&context);
 
     *g.borrow_mut() = Some(Closure::new(move || {
+        let now = window().performance().unwrap().now();
+
         // Velocity Boundary
         boundary_pipeline.set_arguments(&context, -1.0, &boundary_texture, velocity_texture.read());
         quad.blit(Some(velocity_texture.write()));
@@ -556,19 +606,24 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
 
         // Add impulse
         let cur_mouse: (f32, f32) = (
-            mouse.x.get_untracked().div(dye_w as f64) as f32,
-            1.0.sub(mouse.y.get_untracked().div(dye_h as f64)) as f32,
+            mouse.x.get_untracked().div(window_w as f64) as f32,
+            1.0.sub(mouse.y.get_untracked().div(window_h as f64)) as f32,
         );
-        impulse_pipeline.set_arguments(
-            &context,
-            cur_mouse,
-            (cur_mouse.0 - prev_mouse.0, cur_mouse.1 - prev_mouse.1),
-            force_radius,
-            force_scale,
-            velocity_texture.read(),
-        );
-        quad.blit(Some(velocity_texture.write()));
-        velocity_texture.swap();
+        if cur_mouse != prev_mouse {
+            if prev_input_time.is_some() && prev_frame.is_some() && prev_input_time >= prev_frame {
+                impulse_pipeline.set_arguments(
+                    &context,
+                    cur_mouse,
+                    (cur_mouse.0 - prev_mouse.0, cur_mouse.1 - prev_mouse.1),
+                    force_radius,
+                    force_scale,
+                    velocity_texture.read(),
+                );
+                quad.blit(Some(velocity_texture.write()));
+                velocity_texture.swap();
+            }
+            prev_input_time = Some(now);
+        }
         prev_mouse = cur_mouse;
 
         // Diffuse
@@ -639,6 +694,8 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
         );
 
         quad.blit(None);
+
+        prev_frame = Some(now);
 
         window()
             .request_animation_frame(

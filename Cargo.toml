@@ -11,8 +11,11 @@ leptos-use = { version = "0.16.2", features = ["use_mouse"]}
 [dependencies.web-sys]
 version = "0.3"
 features = [
+    "Event",
+    "EventTarget",
     "HtmlElement",
     "MouseEvent",
+    "Touch",
     "WebGl2RenderingContext",
     "WebGlActiveInfo",
     "WebGlBuffer",
