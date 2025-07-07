@@ -1,8 +1,5 @@
 use super::common::*;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use leptos::html::Canvas;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::prelude::*;
@@ -57,12 +54,18 @@ fn canvas_fill(context: WebGl2RenderingContext) {
 
     let mut game_board = make_game_board(&context);
 
-    let f = Rc::new(RefCell::new(None));
-    let g = f.clone();
+    let (frame_count, set_frame_count) = signal(0);
+
+    request_animation_frame(move || {
+        *set_frame_count.write() += 1;
+    });
 
     let mut prev_time = None::<f64>;
 
-    *g.borrow_mut() = Some(Closure::new(move || {
+    let quad = Quad::create(&context);
+
+    Effect::new(move || {
+        frame_count.get();
         let now = window().performance().unwrap().now();
         if !prev_time.is_some() || now - prev_time.unwrap() > 50.0 {
             prev_time = Some(now);
@@ -72,7 +75,7 @@ fn canvas_fill(context: WebGl2RenderingContext) {
                 quad_program.uniforms().get("u_texture"),
                 game_board.read().attach(0),
             );
-            blit(&context, None);
+            quad.blit(None);
 
             context.use_program(Some(life_program.program()));
             context.uniform1i(
@@ -81,30 +84,17 @@ fn canvas_fill(context: WebGl2RenderingContext) {
             );
             context.uniform2f(
                 life_program.uniforms().get("u_texel_size"),
-                game_board.texel_size().x,
-                game_board.texel_size().y,
+                game_board.read().texel_size().0,
+                game_board.read().texel_size().1,
             );
-            blit(&context, Some(&game_board.write()));
+            quad.blit(Some(&game_board.write()));
 
             game_board.swap();
         }
-
-        window()
-            .request_animation_frame(
-                (f.borrow().as_ref().unwrap() as &Closure<dyn FnMut()>)
-                    .as_ref()
-                    .unchecked_ref(),
-            )
-            .expect("requestAnimationFrame failed");
-    }));
-
-    window()
-        .request_animation_frame(
-            (g.borrow().as_ref().unwrap() as &Closure<dyn FnMut()>)
-                .as_ref()
-                .unchecked_ref(),
-        )
-        .expect("requestAnimationFrame failed");
+        request_animation_frame(move || {
+            *set_frame_count.write() += 1;
+        });
+    });
 }
 
 fn make_game_board(context: &WebGl2RenderingContext) -> SwappableTexture {
