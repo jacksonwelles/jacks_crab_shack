@@ -1,5 +1,7 @@
 # Jacks Crab Shack
 
+[Try Me!](https://jacksonwelles.github.io/jacks_crab_shack/)
+
 WIP Personal website built with rust and [leptos](https://leptos.dev/)!
 
 Making this site to throw up cool toy programs (mostly playing with shaders)
