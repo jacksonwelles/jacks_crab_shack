@@ -54,10 +54,10 @@ fn canvas_fill(context: WebGl2RenderingContext) {
 
     let mut game_board = make_game_board(&context);
 
-    let (frame_count, set_frame_count) = signal(0);
+    let (frame_count, set_frame_count) = signal(());
 
     request_animation_frame(move || {
-        *set_frame_count.write() += 1;
+        *set_frame_count.write();
     });
 
     let mut prev_time = None::<f64>;
@@ -65,7 +65,7 @@ fn canvas_fill(context: WebGl2RenderingContext) {
     let quad = Quad::create(&context);
 
     Effect::new(move || {
-        frame_count.get();
+        frame_count.read();
         let now = window().performance().unwrap().now();
         if !prev_time.is_some() || now - prev_time.unwrap() > 50.0 {
             prev_time = Some(now);
@@ -92,7 +92,7 @@ fn canvas_fill(context: WebGl2RenderingContext) {
             game_board.swap();
         }
         request_animation_frame(move || {
-            *set_frame_count.write() += 1;
+            *set_frame_count.write();
         });
     });
 }

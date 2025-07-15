@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::Infallible;
 
 use web_sys::{
     WebGl2RenderingContext, WebGlBuffer, WebGlProgram, WebGlShader, WebGlUniformLocation,
@@ -44,6 +45,12 @@ impl JsView for ArrayView<'_, u8> {
             // it to the js api
             js_sys::Uint8Array::view(self.data).into()
         }
+    }
+}
+
+impl JsView for Infallible {
+    unsafe fn to_js_obj(&self) -> js_sys::Object {
+        unreachable!("we broke rust toto");
     }
 }
 
