@@ -11,7 +11,7 @@ uniform vec2 u_direction;
 const vec4 DARK = vec4(0.502, 0.467, 0.361, 1.0);
 const vec4 LIGHT = vec4(0.796, 0.741, 0.576, 1.0);
 
-float bilerp_with_threshhold(in sampler2D tex, in vec2 uv, in vec2 dir, in float threshold) {
+float bilerp_with_threshhold(in sampler2D tex, in vec2 uv, in float threshold) {
 
     float r_threshold = 1.0 / threshold;
     vec2 st = uv / u_texel_size - 0.5;
@@ -38,7 +38,7 @@ void main() {
     for (int i = 0; i < 4096; i ++) {
         pos += dir;
         threshold += px_tan_theta;
-        if(threshold > 0.5) {
+        if(threshold > 1.0) {
             break;
         }
         shadowed = max(shadowed, bilerp_with_threshhold(u_sand, pos, threshold));
