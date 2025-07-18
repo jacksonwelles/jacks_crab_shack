@@ -1,0 +1,17 @@
+[package]
+name = "utility"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+utility_macro = {path = "../utility_macro"}
+web-sys = {version = "0.3.77", features = [
+    "WebGl2RenderingContext",
+    "WebGlActiveInfo",
+    "WebGlBuffer",
+    "WebGlShader",
+    "WebGlTexture",
+    "WebGlFramebuffer",
+    "WebGlUniformLocation",
+    "WebGlProgram",
+]}

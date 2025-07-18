@@ -1,3 +1,15 @@
+pub mod prelude {
+    pub use utility_macro::render_pipeline;
+    pub use crate::JsView;
+    pub use crate::ArrayView;
+    pub use crate::FromJsView;
+    pub use crate::BufferedTexture;
+    pub use crate::SwappableTexture;
+    pub use crate::Program;
+    pub use crate::Quad;
+    pub use crate::compile_shader;
+}
+
 use std::collections::HashMap;
 use std::convert::Infallible;
 

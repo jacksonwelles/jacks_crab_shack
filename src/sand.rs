@@ -1,10 +1,11 @@
-use std::cell::RefCell;
 use std::convert::Infallible;
 use std::f64::consts::PI;
-use std::ops::{Div, Mul};
+use std::ops::{Div};
 use std::rc::Rc;
 
-use super::common::*;
+use utility::prelude::*;
+
+use utility_macro::render_pipeline;
 
 use leptos::html::Canvas;
 use leptos::prelude::*;
@@ -50,240 +51,12 @@ impl UseMouseEventExtractor for OffsetExtractor {
     }
 }
 
-struct AvalanchePipeline {
-    program: Program,
-    texel_size: (f32, f32),
-    max_height: f32,
-}
+render_pipeline!(AvalanchePipeline, "shaders/avalanche.frag");
 
-impl AvalanchePipeline {
-    const SAND: i32 = 0;
-    pub fn create(context: &WebGl2RenderingContext, program: Program) -> AvalanchePipeline {
-        context.use_program(Some(program.program()));
-        context.uniform1i(
-            program
-                .uniforms()
-                .get("u_sand")
-                .expect("missing argument")
-                .into(),
-            Self::SAND,
-        );
-        AvalanchePipeline {
-            program,
-            texel_size: (0.0, 0.0),
-            max_height: 0.0,
-        }
-    }
-    pub fn set_arguments(
-        &mut self,
-        context: &WebGl2RenderingContext,
-        sand_texture: &BufferedTexture,
-        max_height: f32,
-    ) -> () {
-        debug_assert!(sand_texture.texel_size() == sand_texture.texel_size());
-        context.use_program(Some(self.program.program()));
-        sand_texture.attach(Self::SAND);
-        if self.max_height != max_height {
-            context.uniform1f(
-                self.program
-                    .uniforms()
-                    .get("u_max_height")
-                    .expect("missing argument")
-                    .into(),
-                max_height,
-            );
-            self.max_height = max_height;
-        }
-        if self.texel_size != sand_texture.texel_size() {
-            context.uniform2f(
-                self.program
-                    .uniforms()
-                    .get("u_texel_size")
-                    .expect("missing argument")
-                    .into(),
-                sand_texture.texel_size().0,
-                sand_texture.texel_size().1,
-            );
-            self.texel_size = sand_texture.texel_size();
-        }
-    }
-}
+render_pipeline!(DropPipeline, "shaders/drop_sand.frag");
 
-struct DropPipeline {
-    program: Program,
-    texel_size: (f32, f32),
-    max_height: f32,
-    radius: f32,
-    center: (f32, f32),
-}
+render_pipeline!(ShadowPipeline, "shaders/shadow.frag");
 
-impl DropPipeline {
-    const SAND: i32 = 0;
-    pub fn create(context: &WebGl2RenderingContext, program: Program) -> DropPipeline {
-        context.use_program(Some(program.program()));
-        context.uniform1i(
-            program
-                .uniforms()
-                .get("u_sand")
-                .expect("missing argument")
-                .into(),
-            Self::SAND,
-        );
-        DropPipeline {
-            program,
-            texel_size: (0.0, 0.0),
-            max_height: 0.0,
-            radius: 0.0,
-            center: (0.0, 0.0),
-        }
-    }
-    pub fn set_arguments(
-        &mut self,
-        context: &WebGl2RenderingContext,
-        sand_texture: &BufferedTexture,
-        max_height: f32,
-        radius: f32,
-        center: (f32, f32),
-    ) -> () {
-        debug_assert!(sand_texture.texel_size() == sand_texture.texel_size());
-        context.use_program(Some(self.program.program()));
-        sand_texture.attach(Self::SAND);
-        if self.max_height != max_height {
-            context.uniform1f(
-                self.program
-                    .uniforms()
-                    .get("u_max_height")
-                    .expect("missing argument")
-                    .into(),
-                max_height,
-            );
-            self.max_height = max_height;
-        }
-        if self.radius != radius {
-            context.uniform1f(
-                self.program
-                    .uniforms()
-                    .get("u_radius")
-                    .expect("missing argument")
-                    .into(),
-                radius,
-            );
-            self.radius = radius;
-        }
-        if self.texel_size != sand_texture.texel_size() {
-            context.uniform2f(
-                self.program
-                    .uniforms()
-                    .get("u_texel_size")
-                    .expect("missing argument")
-                    .into(),
-                sand_texture.texel_size().0,
-                sand_texture.texel_size().1,
-            );
-            self.texel_size = sand_texture.texel_size();
-        }
-        if self.center != center {
-            context.uniform2f(
-                self.program
-                    .uniforms()
-                    .get("u_center")
-                    .expect("missing argument")
-                    .into(),
-                center.0,
-                center.1,
-            );
-            self.center = center;
-        }
-    }
-}
-
-struct ShadowPipeline {
-    program: Program,
-    texel_size: (f32, f32),
-    direction: (f32, f32),
-    tan_theta: f32,
-    max_height: f32,
-}
-
-impl ShadowPipeline {
-    const SAND: i32 = 0;
-    pub fn create(context: &WebGl2RenderingContext, program: Program) -> ShadowPipeline {
-        context.use_program(Some(program.program()));
-        context.uniform1i(
-            program
-                .uniforms()
-                .get("u_sand")
-                .expect("missing argument")
-                .into(),
-            Self::SAND,
-        );
-        ShadowPipeline {
-            program,
-            texel_size: (0.0, 0.0),
-            direction: (0.0, 0.0),
-            tan_theta: 0.0,
-            max_height: 0.0,
-        }
-    }
-    pub fn set_arguments(
-        &mut self,
-        context: &WebGl2RenderingContext,
-        sand_texture: &BufferedTexture,
-        direction: (f32, f32),
-        tan_theta: f32,
-        max_height: f32,
-    ) -> () {
-        debug_assert!(sand_texture.texel_size() == sand_texture.texel_size());
-        context.use_program(Some(self.program.program()));
-        sand_texture.attach(Self::SAND);
-        if self.max_height != max_height {
-            context.uniform1f(
-                self.program
-                    .uniforms()
-                    .get("u_max_height")
-                    .expect("missing argument")
-                    .into(),
-                max_height,
-            );
-            self.max_height = max_height;
-        }
-        if self.tan_theta != tan_theta {
-            context.uniform1f(
-                self.program
-                    .uniforms()
-                    .get("u_tan_theta")
-                    .expect("missing argument")
-                    .into(),
-                tan_theta,
-            );
-            self.tan_theta = tan_theta;
-        }
-        if self.texel_size != sand_texture.texel_size() {
-            context.uniform2f(
-                self.program
-                    .uniforms()
-                    .get("u_texel_size")
-                    .expect("missing argument")
-                    .into(),
-                sand_texture.texel_size().0,
-                sand_texture.texel_size().1,
-            );
-            self.texel_size = sand_texture.texel_size();
-        }
-        if self.direction != direction {
-            context.uniform2f(
-                self.program
-                    .uniforms()
-                    .get("u_direction")
-                    .expect("missing argument")
-                    .into(),
-                direction.0,
-                direction.1,
-            );
-            self.direction = direction;
-        }
-    }
-}
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -385,7 +158,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>, count
         let now = window().performance().unwrap().now();
         if !prev_time.is_some() || now - prev_time.unwrap() > 16.0 {
             prev_time = Some(now);
-            avalanche_pipeline.set_arguments(&context, sand.read(), 255.0);
+            avalanche_pipeline.set_arguments(&context, 255.0, sand.read(), sand.read().texel_size());
             quad.blit(Some(&sand.write()));
             sand.swap();
 
@@ -394,7 +167,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>, count
                 1.0 - mouse.y.get_untracked().div(window_h as f64) as f32,
             );
             if cur_mouse.0 > 0.0 {
-                drop_pipeline.set_arguments(&context, sand.read(), 255.0, 10.0, cur_mouse);
+                drop_pipeline.set_arguments(&context, sand.read(), sand.read().texel_size(), 255.0, 10.0, cur_mouse);
                 quad.blit(Some(&sand.write()));
                 sand.swap();
                 console::log_1(&"Sanding".into());
@@ -407,6 +180,7 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>, count
         shadow_pipeline.set_arguments(
             &context,
             sand.read(),
+            sand.read().texel_size(),
             (angle.cos() as f32, angle.sin() as f32),
             30f32.to_radians().tan(),
             255.0,

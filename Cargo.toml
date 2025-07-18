@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-render_pipeline_macro = {path = "lib/render_pipeline_macro"}
+utility = {path = "lib/utility"}
+utility_macro = {path = "lib/utility_macro"}
 console_error_panic_hook = "0.1.7"
 leptos = { version = "0.8.2", features = ["csr"] }
 leptos-use = { version = "0.16.2", features = ["use_mouse"]}

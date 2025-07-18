@@ -2,11 +2,11 @@ precision mediump float;
 
 varying vec2 v_texcoord;
 
+uniform sampler2D u_sand;
+uniform vec2 u_texel_size;
 uniform float u_max_height;
 uniform float u_radius;
 uniform vec2 u_center;
-uniform vec2 u_texel_size;
-uniform sampler2D u_sand;
 
 void main() {
     float base = texture2D(u_sand, v_texcoord).r;

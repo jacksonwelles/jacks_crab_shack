@@ -2,11 +2,11 @@ precision mediump float;
 
 varying vec2 v_texcoord;
 
-uniform float u_max_height;
-uniform float u_tan_theta;
 uniform sampler2D u_sand;
 uniform vec2 u_texel_size;
 uniform vec2 u_direction;
+uniform float u_tan_theta;
+uniform float u_max_height;
 
 const vec4 DARK = vec4(0.502, 0.467, 0.361, 1.0);
 const vec4 LIGHT = vec4(0.796, 0.741, 0.576, 1.0);

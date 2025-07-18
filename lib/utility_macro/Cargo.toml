@@ -1,5 +1,5 @@
 [package]
-name = "render_pipeline_macro"
+name = "utility_macro"
 version = "0.1.0"
 edition = "2024"
 
