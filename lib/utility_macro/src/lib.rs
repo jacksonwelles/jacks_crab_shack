@@ -94,8 +94,21 @@ fn make_update_step(idx: i32, uniform: &Uniform) -> proc_macro2::TokenStream {
     }
 }
 
-fn parse_shader_path(path: &str) -> Result<Vec<Uniform>, String> {
-    let source = fs::read_to_string(path).map_err(|e| e.to_string())?;
+fn parse_shader_path(path: &str, span: &proc_macro::Span) -> Result<Vec<Uniform>, String> {
+
+    if !path.starts_with('"') || !path.ends_with('"') {
+        return Err("shader path must be a string literal".to_string());
+    }
+    let unquoted_path = &path[1..(path.len() - 1)];
+
+    let mut call_file = span.file();
+    if call_file.is_empty() {
+        // probably from the analyzer, try something and hope it sticks...
+        call_file = "src/foo".to_string();
+    }
+
+    let full_path = Path::new(&call_file).with_file_name(unquoted_path);
+    let source = fs::read_to_string(full_path).map_err(|e| e.to_string())?;
     let mut split = source.split(&[' ', '\r', '\n', '\t']);
     let mut result = Vec::new();
     while let Some(str) = split.next() {
@@ -170,6 +183,7 @@ fn generate_expression(struct_name: Ident, uniforms: Vec<Uniform>) -> proc_macro
                 context: &::web_sys::WebGl2RenderingContext,
                 #(#fn_arguments),*
             ) -> () {
+                context.use_program(Some(self.program.program()));
                 #(#update_steps);*;
             }
         }
@@ -203,17 +217,12 @@ pub fn render_pipeline(input: TokenStream) -> TokenStream {
         _ => abort!(span, "shader path must be a string literal"),
     };
 
-    if !shader_path.starts_with('"') || !shader_path.ends_with('"') {
-        abort!(span, "shader path must be a string literal");
-    }
-    let unquoted_path = &shader_path[1..(shader_path.len() - 1)];
 
-    let full_path = Path::new(&span.file()).with_file_name(unquoted_path);
-    let uniforms = parse_shader_path(full_path.to_str().unwrap())
+    let uniforms = parse_shader_path(&shader_path, &span)
         .map_err(|err| {
             abort!(
                 Span::call_site(),
-                format!("failed to parse file '{}': {}", full_path.display(), err)
+                format!("failed to parse file {}: {}", shader_path.replace('\"', "'"), err)
             )
         })
         .unwrap();
