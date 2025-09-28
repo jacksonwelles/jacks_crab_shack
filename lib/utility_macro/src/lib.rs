@@ -1,4 +1,4 @@
-use proc_macro::{TokenStream, TokenTree, Span};
+use proc_macro::{Span, TokenStream, TokenTree};
 use proc_macro_error::{abort, proc_macro_error};
 use quote::quote;
 use syn::Ident;
@@ -51,7 +51,7 @@ fn make_setup_step(idx: i32, uniform: &Uniform) -> Option<proc_macro2::TokenStre
                 program
                     .uniforms()
                     .get(stringify!(#name))
-                    .unwrap()
+                    .expect(format!("set up for '{}'", stringify!(#name)).as_str())
                     .into(),
                 #idx
             )
@@ -65,25 +65,25 @@ fn make_update_step(idx: i32, uniform: &Uniform) -> proc_macro2::TokenStream {
     if uniform.u_type == UniformType::Sampler2D {
         return quote! {
             #name.attach(#idx)
-        }
+        };
     }
     let uniform_location = quote! {
-        self.program.uniforms().get(stringify!(#name)).unwrap().into()
+        self.program.uniforms().get(stringify!(#name)).expect(format!("uniform location for '{}'", stringify!(#name)).as_str()).into()
     };
     let uniform_update = match uniform.u_type {
-        UniformType::Float => quote!{
+        UniformType::Float => quote! {
             context.uniform1f(#uniform_location, #name)
         },
-        UniformType::Vec2 => quote!{
+        UniformType::Vec2 => quote! {
             context.uniform2f(#uniform_location, #name.0, #name.1)
         },
-        UniformType::Vec3 => quote!{
+        UniformType::Vec3 => quote! {
             context.uniform3f(#uniform_location, #name.0, #name.1, #name.2)
         },
-        UniformType::Vec4 => quote!{
+        UniformType::Vec4 => quote! {
             context.uniform4f(#uniform_location, #name.0, #name.1, #name.2, #name.3)
         },
-        _=> unreachable!()
+        _ => unreachable!(),
     };
 
     quote! {
@@ -95,7 +95,6 @@ fn make_update_step(idx: i32, uniform: &Uniform) -> proc_macro2::TokenStream {
 }
 
 fn parse_shader_path(path: &str, span: &proc_macro::Span) -> Result<Vec<Uniform>, String> {
-
     if !path.starts_with('"') || !path.ends_with('"') {
         return Err("shader path must be a string literal".to_string());
     }
@@ -152,8 +151,8 @@ fn generate_expression(struct_name: Ident, uniforms: Vec<Uniform>) -> proc_macro
         })
         .collect();
 
-    let mut setup_steps =  Vec::new();
-    let mut update_steps= Vec::new();
+    let mut setup_steps = Vec::new();
+    let mut update_steps = Vec::new();
     for (idx, elem) in uniforms.iter().enumerate() {
         if let Some(setup) = make_setup_step(idx as i32, elem) {
             setup_steps.push(setup);
@@ -217,16 +216,18 @@ pub fn render_pipeline(input: TokenStream) -> TokenStream {
         _ => abort!(span, "shader path must be a string literal"),
     };
 
-
     let uniforms = parse_shader_path(&shader_path, &span)
         .map_err(|err| {
             abort!(
                 Span::call_site(),
-                format!("failed to parse file {}: {}", shader_path.replace('\"', "'"), err)
+                format!(
+                    "failed to parse file {}: {}",
+                    shader_path.replace('\"', "'"),
+                    err
+                )
             )
         })
         .unwrap();
 
     generate_expression(struct_name, uniforms).into()
 }
-

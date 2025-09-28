@@ -3,6 +3,7 @@ precision mediump float;
 varying vec2 v_texcoord;
 
 uniform sampler2D u_sand;
+uniform float u_layer;
 uniform vec2 u_texel_size;
 uniform vec2 u_direction;
 uniform float u_tan_theta;
@@ -13,18 +14,46 @@ const vec4 LIGHT = vec4(0.796, 0.741, 0.576, 1.0);
 
 float bilerp_with_threshhold(in sampler2D tex, in vec2 uv, in float threshold) {
 
-    float r_threshold = 1.0 / threshold;
     vec2 st = uv / u_texel_size - 0.5;
 
     vec2 iuv = floor(st);
     vec2 fuv = fract(st);
 
-    float a = floor(texture2D(tex, (iuv + vec2(0.5, 0.5)) * u_texel_size).r * r_threshold);
-    float b = floor(texture2D(tex, (iuv + vec2(1.5, 0.5)) * u_texel_size).r * r_threshold);
-    float c = floor(texture2D(tex, (iuv + vec2(0.5, 1.5)) * u_texel_size).r * r_threshold);
-    float d = floor(texture2D(tex, (iuv + vec2(1.5, 1.5)) * u_texel_size).r * r_threshold);
+    float a = texture2D(tex, (iuv + vec2(0.5, 0.5)) * u_texel_size).r;
+    float b = texture2D(tex, (iuv + vec2(1.5, 0.5)) * u_texel_size).r;
+    float c = texture2D(tex, (iuv + vec2(0.5, 1.5)) * u_texel_size).r;
+    float d = texture2D(tex, (iuv + vec2(1.5, 1.5)) * u_texel_size).r;
 
-    return min(mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y), 1.0);
+    vec4 result = vec4(a,b,c,d);
+    result = min(vec4(1.0, 1.0, 1.0, 1.0), floor(result / threshold));
+
+    /*
+    float a,b,c,d;
+
+    if (u_layer == 0.0) {
+        a = floor(texture2D(tex, (iuv + vec2(0.5, 0.5)) * u_texel_size).r * r_threshold);
+        b = floor(texture2D(tex, (iuv + vec2(1.5, 0.5)) * u_texel_size).r * r_threshold);
+        c = floor(texture2D(tex, (iuv + vec2(0.5, 1.5)) * u_texel_size).r * r_threshold);
+        d = floor(texture2D(tex, (iuv + vec2(1.5, 1.5)) * u_texel_size).r * r_threshold);
+    } else if (u_layer == 1.0) {
+        a = floor(texture2D(tex, (iuv + vec2(0.5, 0.5)) * u_texel_size).g * r_threshold);
+        b = floor(texture2D(tex, (iuv + vec2(1.5, 0.5)) * u_texel_size).g * r_threshold);
+        c = floor(texture2D(tex, (iuv + vec2(0.5, 1.5)) * u_texel_size).g * r_threshold);
+        d = floor(texture2D(tex, (iuv + vec2(1.5, 1.5)) * u_texel_size).g * r_threshold);
+    } else if (u_layer == 2.0) {
+        a = floor(texture2D(tex, (iuv + vec2(0.5, 0.5)) * u_texel_size).b * r_threshold);
+        b = floor(texture2D(tex, (iuv + vec2(1.5, 0.5)) * u_texel_size).b * r_threshold);
+        c = floor(texture2D(tex, (iuv + vec2(0.5, 1.5)) * u_texel_size).b * r_threshold);
+        d = floor(texture2D(tex, (iuv + vec2(1.5, 1.5)) * u_texel_size).b * r_threshold);
+    } else {
+        a = floor(texture2D(tex, (iuv + vec2(0.5, 0.5)) * u_texel_size).a * r_threshold);
+        b = floor(texture2D(tex, (iuv + vec2(1.5, 0.5)) * u_texel_size).a * r_threshold);
+        c = floor(texture2D(tex, (iuv + vec2(0.5, 1.5)) * u_texel_size).a * r_threshold);
+        d = floor(texture2D(tex, (iuv + vec2(1.5, 1.5)) * u_texel_size).a * r_threshold);
+    }
+    */
+
+    return min(mix(mix(result[0], result[1], fuv.x), mix(result[2], result[3], fuv.x), fuv.y), 1.0);
 }
 
 

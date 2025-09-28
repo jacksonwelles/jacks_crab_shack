@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::convert::Infallible;
 use std::f64::consts::PI;
-use std::ops::Div;
 use std::rc::Rc;
 
 use utility::prelude::*;
@@ -11,8 +10,6 @@ use utility_macro::render_pipeline;
 use leptos::html::Canvas;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::prelude::*;
-
-use leptos::logging::log;
 
 use leptos_use::use_event_listener;
 
@@ -24,7 +21,9 @@ render_pipeline!(AvalanchePipeline, "shaders/avalanche.frag");
 
 render_pipeline!(DropPipeline, "shaders/drop_sand.frag");
 
-render_pipeline!(ShadowPipeline, "shaders/shadow.frag");
+render_pipeline!(ShadowPipeline, "shaders/optimized_shadow.frag");
+
+render_pipeline!(PrecomputeShadowPipeline, "shaders/precompute_shadow.frag");
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -37,6 +36,7 @@ pub fn App() -> impl IntoView {
             tup.2 = evt.offset_y();
         });
     });
+    let (layer, set_layer) = signal(0);
     let (count, set_count) = signal(0);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
@@ -48,11 +48,16 @@ pub fn App() -> impl IntoView {
                 .expect("object")
                 .dyn_into::<WebGl2RenderingContext>()
                 .unwrap();
-            canvas_fill(context.clone(), count.into(), mouse.into());
+            canvas_fill(context.clone(), count.into(), layer.into(), mouse.into());
         }
     });
 
     view! {
+    <button
+        on:click=move |_| *set_layer.write() += 1
+    >
+        {move || {layer.get() % 4}}
+    </button> <canvas node_ref=canvas_ref />
     <button
         on:click=move |_| *set_count.write() += 1
     >
@@ -63,6 +68,7 @@ pub fn App() -> impl IntoView {
 fn canvas_fill(
     context: WebGl2RenderingContext,
     count: Signal<i32>,
+    layer: Signal<i32>,
     mouse: Signal<(usize, i32, i32)>,
 ) {
     let quad_vert_shader = compile_shader(
@@ -89,7 +95,7 @@ fn canvas_fill(
     let shadow_frag_shader = compile_shader(
         &context,
         GL::FRAGMENT_SHADER,
-        include_str!("shaders/shadow.frag"),
+        include_str!("shaders/optimized_shadow.frag"),
     )
     .unwrap();
 
@@ -100,11 +106,19 @@ fn canvas_fill(
     )
     .unwrap();
 
+    let precompute_frag_shader = compile_shader(
+        &context,
+        GL::FRAGMENT_SHADER,
+        include_str!("shaders/precompute_shadow.frag"),
+    )
+    .unwrap();
+
     let window_w = context.drawing_buffer_width() as usize;
     let window_h = context.drawing_buffer_height() as usize;
 
-    let sand_w = 4;
-    let sand_h = 4;
+    let sand_w = 16;
+    let sand_h = 16;
+    let scale = 4.0f32;
 
     let window_texel_size = (1.0 / window_w as f32, 1.0 / window_h as f32);
 
@@ -112,12 +126,15 @@ fn canvas_fill(
     let avalanche_program = Program::create(&context, &quad_vert_shader, &avalanche_frag_shader);
     let shadow_program = Program::create(&context, &quad_vert_shader, &shadow_frag_shader);
     let drop_program = Program::create(&context, &quad_vert_shader, &drop_frag_shader);
+    let precompute_program = Program::create(&context, &quad_vert_shader, &precompute_frag_shader);
 
     let mut avalanche_pipeline = AvalanchePipeline::create(&context, avalanche_program);
     let mut shadow_pipeline = ShadowPipeline::create(&context, shadow_program);
     let mut drop_pipeline = DropPipeline::create(&context, drop_program);
+    let mut precompute_pipeline = PrecomputeShadowPipeline::create(&context, precompute_program);
 
-    let mut sand = Rc::new(RefCell::new(make_sand(&context, sand_w, sand_h)));
+    let sand = Rc::new(RefCell::new(make_sand(&context, sand_w, sand_h)));
+    let mut precompute_texture = make_shadow_precompute(&context, window_w, window_h);
 
     let (next_fame, set_next_frame) = signal(());
 
@@ -159,14 +176,41 @@ fn canvas_fill(
         if count.get() % 2 == 0 {
             angle = now % 20000.0 * (PI / 10000.0);
         }
+        let direction = (angle.cos() as f32, angle.sin() as f32);
+
+        if count.get() % 2 == 0 {
+            precompute_pipeline.set_arguments(
+                &context,
+                sand.borrow().read(),
+                scale,
+                direction,
+                precompute_texture.read().texel_size(),
+                0.0,
+            );
+
+            quad.blit(Some(precompute_texture.write()));
+            precompute_texture.swap();
+            for i in 1..4 {
+                precompute_pipeline.set_arguments(
+                    &context,
+                    precompute_texture.read(),
+                    scale,
+                    direction,
+                    precompute_texture.read().texel_size(),
+                    i as f32,
+                );
+                quad.blit(Some(precompute_texture.write()));
+                precompute_texture.swap();
+            }
+        }
 
         shadow_pipeline.set_arguments(
             &context,
             sand.borrow().read(),
-            window_texel_size,
-            (angle.cos() as f32, angle.sin() as f32),
-            30f32.to_radians().tan(),
-            255.0,
+            precompute_texture.read(),
+            scale,
+            (window_texel_size.0, window_texel_size.1, 1.0 / 255.0),
+            (direction.0, direction.1, 30f32.to_radians().tan()),
         );
         quad.blit(None);
 
@@ -186,6 +230,31 @@ fn make_sand(context: &WebGl2RenderingContext, width: usize, height: usize) -> S
         height as i32,
         0,
         GL::RED,
+        GL::UNSIGNED_BYTE,
+        None::<Infallible>,
+        &[
+            (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
+            (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
+            (GL::TEXTURE_WRAP_S, GL::REPEAT),
+            (GL::TEXTURE_WRAP_T, GL::REPEAT),
+        ],
+    );
+}
+
+fn make_shadow_precompute(
+    context: &WebGl2RenderingContext,
+    width: usize,
+    height: usize,
+) -> SwappableTexture {
+    return SwappableTexture::create(
+        context,
+        GL::TEXTURE_2D,
+        0,
+        GL::RGBA8,
+        width as i32,
+        height as i32,
+        0,
+        GL::RGBA,
         GL::UNSIGNED_BYTE,
         None::<Infallible>,
         &[
