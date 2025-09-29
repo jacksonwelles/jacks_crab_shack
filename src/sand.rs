@@ -14,6 +14,7 @@ use leptos::wasm_bindgen::prelude::*;
 use leptos_use::use_event_listener;
 
 use web_sys::WebGl2RenderingContext;
+use web_sys::console;
 
 type GL = WebGl2RenderingContext;
 
@@ -23,21 +24,25 @@ render_pipeline!(DropPipeline, "shaders/drop_sand.frag");
 
 render_pipeline!(ShadowPipeline, "shaders/optimized_shadow.frag");
 
-render_pipeline!(PrecomputeShadowPipeline, "shaders/precompute_shadow.frag");
+render_pipeline!(LookaheadPipeline, "shaders/precompute_shadow.frag");
 
 #[component]
 pub fn App() -> impl IntoView {
     let canvas_ref = NodeRef::<Canvas>::new();
-    let (mouse, set_mouse) = signal((0usize, 0i32, 0i32));
-    let _ = use_event_listener(canvas_ref, leptos::ev::click, move |evt| {
+    let (mouse, set_mouse) = signal((false, 0i32, 0i32));
+    let _ = use_event_listener(canvas_ref, leptos::ev::mousedown, move |evt| {
+        *set_mouse.write() = (true, evt.offset_x(), evt.offset_y());
+    });
+    let _ = use_event_listener(canvas_ref, leptos::ev::mouseup, move |evt| {
+        *set_mouse.write() = (false, evt.offset_x(), evt.offset_y());
+    });
+    let _ = use_event_listener(canvas_ref, leptos::ev::mousemove, move |evt| {
         set_mouse.update(|tup| {
-            tup.0 += 1;
             tup.1 = evt.offset_x();
             tup.2 = evt.offset_y();
         });
     });
-    let (layer, set_layer) = signal(0);
-    let (count, set_count) = signal(0);
+    let (sun_move, set_sun_move) = signal(0);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
             canvas.set_width(512);
@@ -48,28 +53,24 @@ pub fn App() -> impl IntoView {
                 .expect("object")
                 .dyn_into::<WebGl2RenderingContext>()
                 .unwrap();
-            canvas_fill(context.clone(), count.into(), layer.into(), mouse.into());
+            canvas_fill(context.clone(), sun_move.into(), mouse.into());
         }
     });
 
     view! {
-    <button
-        on:click=move |_| *set_layer.write() += 1
+     <canvas node_ref=canvas_ref />
+     <br/>
+     <button
+        on:click=move |_| *set_sun_move.write() += 1
     >
-        {move || {layer.get() % 4}}
-    </button> <canvas node_ref=canvas_ref />
-    <button
-        on:click=move |_| *set_count.write() += 1
-    >
-        {move || {if count.get() % 2 == 0 {"STOP"} else {"START"}}}
-    </button> <canvas node_ref=canvas_ref /> }
+        {move || {if sun_move.get() % 2 == 0 {"STOP"} else {"START"}}}
+    </button> }
 }
 
 fn canvas_fill(
     context: WebGl2RenderingContext,
-    count: Signal<i32>,
-    layer: Signal<i32>,
-    mouse: Signal<(usize, i32, i32)>,
+    sun_move: Signal<i32>,
+    mouse: Signal<(bool, i32, i32)>,
 ) {
     let quad_vert_shader = compile_shader(
         &context,
@@ -106,7 +107,7 @@ fn canvas_fill(
     )
     .unwrap();
 
-    let precompute_frag_shader = compile_shader(
+    let lookahead_frag_shader = compile_shader(
         &context,
         GL::FRAGMENT_SHADER,
         include_str!("shaders/precompute_shadow.frag"),
@@ -116,8 +117,8 @@ fn canvas_fill(
     let window_w = context.drawing_buffer_width() as usize;
     let window_h = context.drawing_buffer_height() as usize;
 
-    let sand_w = 16;
-    let sand_h = 16;
+    let sand_w = window_w;
+    let sand_h = window_h;
     let scale = 4.0f32;
 
     let window_texel_size = (1.0 / window_w as f32, 1.0 / window_h as f32);
@@ -126,32 +127,67 @@ fn canvas_fill(
     let avalanche_program = Program::create(&context, &quad_vert_shader, &avalanche_frag_shader);
     let shadow_program = Program::create(&context, &quad_vert_shader, &shadow_frag_shader);
     let drop_program = Program::create(&context, &quad_vert_shader, &drop_frag_shader);
-    let precompute_program = Program::create(&context, &quad_vert_shader, &precompute_frag_shader);
+    let lookahead_program = Program::create(&context, &quad_vert_shader, &lookahead_frag_shader);
 
     let mut avalanche_pipeline = AvalanchePipeline::create(&context, avalanche_program);
     let mut shadow_pipeline = ShadowPipeline::create(&context, shadow_program);
     let mut drop_pipeline = DropPipeline::create(&context, drop_program);
-    let mut precompute_pipeline = PrecomputeShadowPipeline::create(&context, precompute_program);
+    let mut lookahead_pipeline = LookaheadPipeline::create(&context, lookahead_program);
 
     let sand = Rc::new(RefCell::new(make_sand(&context, sand_w, sand_h)));
-    let mut precompute_texture = make_shadow_precompute(&context, window_w, window_h);
+    let lookahead = Rc::new(RefCell::new(make_shadow_lookahead(
+        &context, window_w, window_h,
+    )));
 
-    let (next_fame, set_next_frame) = signal(());
+    let (next_frame, set_next_frame) = signal(());
 
     request_animation_frame(move || {
         *set_next_frame.write();
     });
 
+    let (signal_lookahead, set_signal_lookahead) = signal(());
+    let (signal_drop, set_signal_drop) = signal(());
+    let (signal_avalanche, set_signal_avalanche) = signal(());
+    let (angle, set_angle) = signal(0.0);
+
+    let mut prev_avalance = None::<f64>;
     let mut prev_time = None::<f64>;
-    let mut angle = 0.0;
+
+    Effect::new(move || {
+        next_frame.get();
+        let now = window().performance().unwrap().now();
+        if sun_move.get_untracked() % 2 == 0 {
+            if prev_time.is_some() {
+                *set_angle.write() += (now - prev_time.unwrap()) % 20000.0 * (PI / 10000.0);
+            }
+            set_signal_lookahead.write();
+        }
+        if mouse.get_untracked().0 {
+            set_signal_drop.write();
+        }
+        set_signal_avalanche.write();
+        prev_time = Some(now);
+        request_animation_frame(move || {
+            *set_next_frame.write();
+        });
+    });
 
     let quad = Rc::new(Quad::create(&context));
+
+    // Drop sand
+    let mut prev_drop = None::<f64>;
     {
         let context = context.clone();
         let sand = sand.clone();
         let quad = quad.clone();
         Effect::new(move || {
-            let (_, mouse_x, mouse_y) = mouse.get();
+            signal_drop.get();
+            let now = window().performance().unwrap().now();
+            if prev_drop.is_some() && now - prev_drop.unwrap() < 16.0 {
+                return;
+            }
+            prev_drop = Some(now);
+            let (_, mouse_x, mouse_y) = mouse.get_untracked();
             let pos: (f32, f32) = (
                 mouse_x as f32 / window_w as f32,
                 1.0 - mouse_y as f32 / window_h as f32,
@@ -161,62 +197,76 @@ fn canvas_fill(
                 sand.borrow().read(),
                 sand.borrow().read().texel_size(),
                 255.0,
-                0.6,
+                60.0,
                 pos,
             );
             quad.blit(Some(&sand.borrow().write()));
             sand.borrow_mut().swap();
+            set_signal_lookahead.write();
+            console::log_1(&"Dropping sand".into());
         });
     }
 
-    Effect::new(move || {
-        next_fame.get();
-        let now = window().performance().unwrap().now();
-
-        if count.get() % 2 == 0 {
-            angle = now % 20000.0 * (PI / 10000.0);
-        }
-        let direction = (angle.cos() as f32, angle.sin() as f32);
-
-        if count.get() % 2 == 0 {
-            precompute_pipeline.set_arguments(
+    // Update the lookahead texture
+    let mut prev_lookahead = None::<f64>;
+    {
+        let context = context.clone();
+        let sand = sand.clone();
+        let quad = quad.clone();
+        let lookahead = lookahead.clone();
+        Effect::new(move || {
+            signal_lookahead.get();
+            let now = window().performance().unwrap().now();
+            if prev_lookahead.is_some() && now - prev_lookahead.unwrap() < 16.0 {
+                return;
+            }
+            prev_lookahead = Some(now);
+            let direction = (
+                angle.get_untracked().cos() as f32,
+                angle.get_untracked().sin() as f32,
+            );
+            lookahead_pipeline.set_arguments(
                 &context,
                 sand.borrow().read(),
                 scale,
                 direction,
-                precompute_texture.read().texel_size(),
+                lookahead.borrow().read().texel_size(),
                 0.0,
             );
 
-            quad.blit(Some(precompute_texture.write()));
-            precompute_texture.swap();
+            quad.blit(Some(lookahead.borrow().write()));
+            lookahead.borrow_mut().swap();
             for i in 1..4 {
-                precompute_pipeline.set_arguments(
+                lookahead_pipeline.set_arguments(
                     &context,
-                    precompute_texture.read(),
+                    lookahead.borrow().read(),
                     scale,
                     direction,
-                    precompute_texture.read().texel_size(),
+                    lookahead.borrow().read().texel_size(),
                     i as f32,
                 );
-                quad.blit(Some(precompute_texture.write()));
-                precompute_texture.swap();
+                quad.blit(Some(lookahead.borrow().write()));
+                lookahead.borrow_mut().swap();
             }
-        }
+        });
+    }
+
+    Effect::new(move || {
+        next_frame.get();
+        let direction = (
+            angle.get_untracked().cos() as f32,
+            angle.get_untracked().sin() as f32,
+        );
 
         shadow_pipeline.set_arguments(
             &context,
             sand.borrow().read(),
-            precompute_texture.read(),
+            lookahead.borrow().read(),
             scale,
             (window_texel_size.0, window_texel_size.1, 1.0 / 255.0),
             (direction.0, direction.1, 30f32.to_radians().tan()),
         );
         quad.blit(None);
-
-        request_animation_frame(move || {
-            *set_next_frame.write();
-        });
     });
 }
 
@@ -241,7 +291,7 @@ fn make_sand(context: &WebGl2RenderingContext, width: usize, height: usize) -> S
     );
 }
 
-fn make_shadow_precompute(
+fn make_shadow_lookahead(
     context: &WebGl2RenderingContext,
     width: usize,
     height: usize,
