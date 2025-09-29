@@ -1,13 +1,13 @@
 pub mod prelude {
-    pub use utility_macro::render_pipeline;
-    pub use crate::JsView;
     pub use crate::ArrayView;
-    pub use crate::FromJsView;
     pub use crate::BufferedTexture;
-    pub use crate::SwappableTexture;
+    pub use crate::FromJsView;
+    pub use crate::JsView;
     pub use crate::Program;
     pub use crate::Quad;
+    pub use crate::SwappableTexture;
     pub use crate::compile_shader;
+    pub use utility_macro::render_pipeline;
 }
 
 use std::collections::HashMap;
@@ -89,6 +89,8 @@ pub struct BufferedTexture {
     internal_format: u32,
     width: i32,
     height: i32,
+    format: u32,
+    data_type: u32,
     texel_size: (f32, f32),
 }
 
@@ -144,6 +146,8 @@ impl FromJsView for BufferedTexture {
             internal_format,
             width,
             height,
+            format,
+            data_type,
             texel_size: (1.0 / width as f32, 1.0 / height as f32),
         }
     }
@@ -183,6 +187,34 @@ impl BufferedTexture {
             0,
         );
         Ok(())
+    }
+
+    pub fn print(&self) -> String {
+        self.context
+            .bind_framebuffer(GL::FRAMEBUFFER, self.framebuffer.as_ref());
+        let mut data = vec![0; (self.width * self.height) as usize];
+        let result = self.context.read_pixels_with_opt_u8_array(
+            0,
+            0,
+            self.width,
+            self.height,
+            self.format,
+            self.data_type,
+            Some(&mut data),
+        );
+        match result {
+            Ok(_) => (),
+            Err(err) => panic!("error printing: {:#?}", err),
+        }
+        self.context.bind_framebuffer(GL::FRAMEBUFFER, None);
+        let mut out = String::new();
+        for i in (0..self.width).rev() {
+            for j in 0..self.height {
+                out += format!("{:4}, ", data[(i * self.height + j) as usize]).as_str();
+            }
+            out += "\n";
+        }
+        return out;
     }
 }
 

@@ -21,7 +21,7 @@ vec4 get_max_height() {
     float step_length = pow(u_factor, u_pass_num);
     vec2 norm_direction = normalize(u_direction) * u_texel_size;
     for (int i = 0; i < 20; i++) {
-        if (float(i) >= u_factor + 1.0) {
+        if (float(i) >= u_factor) {
             break;
         }
         vec4 height = get_adjacent(v_texcoord + norm_direction * float(i) * step_length);

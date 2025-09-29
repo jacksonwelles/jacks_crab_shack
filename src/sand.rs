@@ -18,13 +18,17 @@ use web_sys::console;
 
 type GL = WebGl2RenderingContext;
 
-render_pipeline!(AvalanchePipeline, "shaders/avalanche.frag");
+render_pipeline!(AvalancheCalcPipeline, "shaders/avalanche_calc.frag");
+
+render_pipeline!(AvalancheApplyPipeline, "shaders/avalanche_apply.frag");
 
 render_pipeline!(DropPipeline, "shaders/drop_sand.frag");
 
 render_pipeline!(ShadowPipeline, "shaders/optimized_shadow.frag");
 
 render_pipeline!(LookaheadPipeline, "shaders/precompute_shadow.frag");
+
+render_pipeline!(ShiftPipeline, "shaders/shift_rand.frag");
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -79,17 +83,17 @@ fn canvas_fill(
     )
     .unwrap();
 
-    let quad_frag_shader = compile_shader(
+    let avalanche_calc_frag_shader = compile_shader(
         &context,
         GL::FRAGMENT_SHADER,
-        include_str!("shaders/quad.frag"),
+        include_str!("shaders/avalanche_calc.frag"),
     )
     .unwrap();
 
-    let avalanche_frag_shader = compile_shader(
+    let avalanche_apply_frag_shader = compile_shader(
         &context,
         GL::FRAGMENT_SHADER,
-        include_str!("shaders/avalanche.frag"),
+        include_str!("shaders/avalanche_apply.frag"),
     )
     .unwrap();
 
@@ -114,6 +118,13 @@ fn canvas_fill(
     )
     .unwrap();
 
+    let shift_frag_shader = compile_shader(
+        &context,
+        GL::FRAGMENT_SHADER,
+        include_str!("shaders/shift_rand.frag"),
+    )
+    .unwrap();
+
     let window_w = context.drawing_buffer_width() as usize;
     let window_h = context.drawing_buffer_height() as usize;
 
@@ -123,17 +134,26 @@ fn canvas_fill(
 
     let window_texel_size = (1.0 / window_w as f32, 1.0 / window_h as f32);
 
-    let quad_program = Program::create(&context, &quad_vert_shader, &quad_frag_shader);
-    let avalanche_program = Program::create(&context, &quad_vert_shader, &avalanche_frag_shader);
+    let avalanche_calc_program =
+        Program::create(&context, &quad_vert_shader, &avalanche_calc_frag_shader);
+    let avalanche_apply_program =
+        Program::create(&context, &quad_vert_shader, &avalanche_apply_frag_shader);
     let shadow_program = Program::create(&context, &quad_vert_shader, &shadow_frag_shader);
     let drop_program = Program::create(&context, &quad_vert_shader, &drop_frag_shader);
     let lookahead_program = Program::create(&context, &quad_vert_shader, &lookahead_frag_shader);
+    let shift_program = Program::create(&context, &quad_vert_shader, &shift_frag_shader);
 
-    let mut avalanche_pipeline = AvalanchePipeline::create(&context, avalanche_program);
+    let mut avalanche_calc_pipeline =
+        AvalancheCalcPipeline::create(&context, avalanche_calc_program);
+    let mut avalanche_apply_pipeline =
+        AvalancheApplyPipeline::create(&context, avalanche_apply_program);
     let mut shadow_pipeline = ShadowPipeline::create(&context, shadow_program);
     let mut drop_pipeline = DropPipeline::create(&context, drop_program);
     let mut lookahead_pipeline = LookaheadPipeline::create(&context, lookahead_program);
+    let mut shift_pipeline = ShiftPipeline::create(&context, shift_program);
 
+    let mut directions = make_avalance_directions(&context, sand_w, sand_h);
+    let mut delta_sand = make_sand(&context, sand_w, sand_h);
     let sand = Rc::new(RefCell::new(make_sand(&context, sand_w, sand_h)));
     let lookahead = Rc::new(RefCell::new(make_shadow_lookahead(
         &context, window_w, window_h,
@@ -145,12 +165,12 @@ fn canvas_fill(
         *set_next_frame.write();
     });
 
+    // TODO use_leptos has throttled signals that would probably be perfect for this
     let (signal_lookahead, set_signal_lookahead) = signal(());
     let (signal_drop, set_signal_drop) = signal(());
     let (signal_avalanche, set_signal_avalanche) = signal(());
     let (angle, set_angle) = signal(0.0);
 
-    let mut prev_avalance = None::<f64>;
     let mut prev_time = None::<f64>;
 
     Effect::new(move || {
@@ -173,6 +193,63 @@ fn canvas_fill(
     });
 
     let quad = Rc::new(Quad::create(&context));
+
+    // avalance the sand
+    let mut prev_avalanche = None::<f64>;
+    let mut tick = 0;
+    {
+        let context = context.clone();
+        let sand = sand.clone();
+        let quad = quad.clone();
+        Effect::new(move || {
+            signal_avalanche.get();
+            let now = window().performance().unwrap().now();
+            if prev_avalanche.is_some() && now - prev_avalanche.unwrap() < 0.0 {
+                return;
+            }
+            prev_avalanche = Some(now);
+
+            avalanche_calc_pipeline.set_arguments(
+                &context,
+                255.0,
+                sand.borrow().read(),
+                directions.read(),
+                sand.borrow().read().texel_size(),
+            );
+            quad.blit(Some(delta_sand.write()));
+            delta_sand.swap();
+
+            avalanche_apply_pipeline.set_arguments(
+                &context,
+                255.0,
+                sand.borrow().read(),
+                delta_sand.read(),
+                sand.borrow().read().texel_size(),
+            );
+
+            quad.blit(Some(sand.borrow().write()));
+            sand.borrow_mut().swap();
+
+            let direction = if tick == sand_w - 1 {
+                tick = 0;
+                (1.0, 1.0)
+            } else {
+                tick += 1;
+                (1.0, 0.0)
+            };
+
+            shift_pipeline.set_arguments(
+                &context,
+                directions.read(),
+                directions.read().texel_size(),
+                direction,
+            );
+            quad.blit(Some(directions.write()));
+            directions.swap();
+
+            set_signal_lookahead.write();
+        });
+    }
 
     // Drop sand
     let mut prev_drop = None::<f64>;
@@ -197,13 +274,12 @@ fn canvas_fill(
                 sand.borrow().read(),
                 sand.borrow().read().texel_size(),
                 255.0,
-                60.0,
+                20.0,
                 pos,
             );
             quad.blit(Some(&sand.borrow().write()));
             sand.borrow_mut().swap();
             set_signal_lookahead.write();
-            console::log_1(&"Dropping sand".into());
         });
     }
 
@@ -264,7 +340,7 @@ fn canvas_fill(
             lookahead.borrow().read(),
             scale,
             (window_texel_size.0, window_texel_size.1, 1.0 / 255.0),
-            (direction.0, direction.1, 30f32.to_radians().tan()),
+            (direction.0, direction.1, 46f32.to_radians().tan()),
         );
         quad.blit(None);
     });
@@ -282,6 +358,60 @@ fn make_sand(context: &WebGl2RenderingContext, width: usize, height: usize) -> S
         GL::RED,
         GL::UNSIGNED_BYTE,
         None::<Infallible>,
+        &[
+            (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
+            (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
+            (GL::TEXTURE_WRAP_S, GL::REPEAT),
+            (GL::TEXTURE_WRAP_T, GL::REPEAT),
+        ],
+    );
+}
+
+struct ShiftState {
+    x: u8,
+    y: u8,
+    z: u8,
+    a: u8,
+}
+
+fn xshift(state: &mut ShiftState) -> u8 {
+    let t = state.x ^ (state.x << 5);
+    state.x = state.y;
+    state.y = state.z;
+    state.z = state.a;
+    state.a = state.z ^ (state.z >> 1) ^ t ^ (t << 3);
+    state.a
+}
+
+fn make_avalance_directions(
+    context: &WebGl2RenderingContext,
+    width: usize,
+    height: usize,
+) -> SwappableTexture {
+    let mut state = ShiftState {
+        x: 0,
+        y: 0,
+        z: 0,
+        a: 1,
+    };
+    for _ in 0..20 {
+        xshift(&mut state);
+    }
+    let data: Vec<u8> = (0..(width * height))
+        .map(|_| xshift(&mut state))
+        .collect();
+
+    return SwappableTexture::create(
+        context,
+        GL::TEXTURE_2D,
+        0,
+        GL::R8,
+        width as i32,
+        height as i32,
+        0,
+        GL::RED,
+        GL::UNSIGNED_BYTE,
+        Some(ArrayView::create(&data)),
         &[
             (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
             (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
