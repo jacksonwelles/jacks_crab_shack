@@ -50,6 +50,10 @@ pub fn App() -> impl IntoView {
         });
     });
     let _ = use_event_listener(canvas_ref, leptos::ev::touchstart, move |evt| {
+        if evt.touches().length() != 1 {
+            set_mouse.update(|tup| tup.0 = false);
+            return;
+        }
         let touch = evt.touches().item(0).unwrap();
         let element = touch
             .target()
@@ -64,23 +68,8 @@ pub fn App() -> impl IntoView {
             touch.client_y() - rect.y() as i32,
         );
     });
-    let _ = use_event_listener(canvas_ref, leptos::ev::touchend, move |evt| {
-        if evt.touches().length() == 0 {
-            set_mouse.update(|tup| tup.0 = false);
-            return;
-        }
-        let touch = evt.touches().item(0).unwrap();
-        let element = touch
-            .target()
-            .unwrap()
-            .dyn_ref::<HtmlElement>()
-            .unwrap()
-            .clone();
-        let rect = element.get_bounding_client_rect();
-        set_mouse.update(|tup| {
-            tup.1 = touch.client_x() - rect.x() as i32;
-            tup.2 = touch.client_y() - rect.y() as i32;
-        });
+    let _ = use_event_listener(canvas_ref, leptos::ev::touchend, move |_| {
+        set_mouse.update(|tup| tup.0 = false)
     });
     let _ = use_event_listener(canvas_ref, leptos::ev::touchmove, move |evt| {
         let touch = evt.touches().item(0).unwrap();
