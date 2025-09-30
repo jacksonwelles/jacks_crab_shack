@@ -67,12 +67,7 @@ float amount_shadowed(in vec2 uv, in float threshold) {
 
 void main() {
     vec3 dir = u_voxel_size * (
-        u_direction / dot(
-            u_direction,
-            normalize(
-                vec3(u_direction.x, u_direction.y, 0)
-            )
-        )
+        u_direction / length(u_direction.xy)
     );
 
     vec3 pos = vec3(v_texcoord.x, v_texcoord.y, texture2D(u_sand, v_texcoord).r);
@@ -98,8 +93,9 @@ void main() {
             if (shadowed >= 0.99) {
                 break;
             }
+        } else {
+            pos += dir * pow(u_scale, level + 1.0);
         }
-        pos += dir * pow(u_scale, level + 1.0);
         level = min(level + 1.0, 3.0);
     }
     gl_FragColor = LIGHT + (DARK - LIGHT) * shadowed;

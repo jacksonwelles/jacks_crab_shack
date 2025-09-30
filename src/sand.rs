@@ -13,11 +13,14 @@ use leptos::wasm_bindgen::prelude::*;
 
 use leptos_use::use_event_listener;
 
+use web_sys::HtmlElement;
+use web_sys::Touch;
 use web_sys::WebGl2RenderingContext;
 use web_sys::console;
 
 type GL = WebGl2RenderingContext;
 
+render_pipeline!(QuadPipeline, "shaders/quad.frag");
 render_pipeline!(AvalancheCalcPipeline, "shaders/avalanche_calc.frag");
 
 render_pipeline!(AvalancheApplyPipeline, "shaders/avalanche_apply.frag");
@@ -37,13 +40,60 @@ pub fn App() -> impl IntoView {
     let _ = use_event_listener(canvas_ref, leptos::ev::mousedown, move |evt| {
         *set_mouse.write() = (true, evt.offset_x(), evt.offset_y());
     });
-    let _ = use_event_listener(canvas_ref, leptos::ev::mouseup, move |evt| {
-        *set_mouse.write() = (false, evt.offset_x(), evt.offset_y());
+    let _ = use_event_listener(canvas_ref, leptos::ev::mouseup, move |_| {
+        set_mouse.update(|tup| tup.0 = false);
     });
     let _ = use_event_listener(canvas_ref, leptos::ev::mousemove, move |evt| {
         set_mouse.update(|tup| {
             tup.1 = evt.offset_x();
             tup.2 = evt.offset_y();
+        });
+    });
+    let _ = use_event_listener(canvas_ref, leptos::ev::touchstart, move |evt| {
+        let touch = evt.touches().item(0).unwrap();
+        let element = touch
+            .target()
+            .unwrap()
+            .dyn_ref::<HtmlElement>()
+            .unwrap()
+            .clone();
+        let rect = element.get_bounding_client_rect();
+        *set_mouse.write() = (
+            true,
+            touch.client_x() - rect.x() as i32,
+            touch.client_y() - rect.y() as i32,
+        );
+    });
+    let _ = use_event_listener(canvas_ref, leptos::ev::touchend, move |evt| {
+        if evt.touches().length() == 0 {
+            set_mouse.update(|tup| tup.0 = false);
+            return;
+        }
+        let touch = evt.touches().item(0).unwrap();
+        let element = touch
+            .target()
+            .unwrap()
+            .dyn_ref::<HtmlElement>()
+            .unwrap()
+            .clone();
+        let rect = element.get_bounding_client_rect();
+        set_mouse.update(|tup| {
+            tup.1 = touch.client_x() - rect.x() as i32;
+            tup.2 = touch.client_y() - rect.y() as i32;
+        });
+    });
+    let _ = use_event_listener(canvas_ref, leptos::ev::touchmove, move |evt| {
+        let touch = evt.touches().item(0).unwrap();
+        let element = touch
+            .target()
+            .unwrap()
+            .dyn_ref::<HtmlElement>()
+            .unwrap()
+            .clone();
+        let rect = element.get_bounding_client_rect();
+        set_mouse.update(|tup| {
+            tup.1 = touch.client_x() - rect.x() as i32;
+            tup.2 = touch.client_y() - rect.y() as i32;
         });
     });
     let (sun_move, set_sun_move) = signal(0);
@@ -62,7 +112,7 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
-     <canvas node_ref=canvas_ref />
+     <canvas style:touch-action="pinch-zoom" node_ref=canvas_ref />
      <br/>
      <button
         on:click=move |_| *set_sun_move.write() += 1
@@ -80,6 +130,13 @@ fn canvas_fill(
         &context,
         GL::VERTEX_SHADER,
         include_str!("shaders/quad.vert"),
+    )
+    .unwrap();
+
+    let quad_frag_shader = compile_shader(
+        &context,
+        GL::FRAGMENT_SHADER,
+        include_str!("shaders/quad.frag"),
     )
     .unwrap();
 
@@ -131,9 +188,11 @@ fn canvas_fill(
     let sand_w = window_w;
     let sand_h = window_h;
     let scale = 4.0f32;
+    let max_height = 255.0f32;
 
     let window_texel_size = (1.0 / window_w as f32, 1.0 / window_h as f32);
 
+    let quad_program = Program::create(&context, &quad_vert_shader, &quad_frag_shader);
     let avalanche_calc_program =
         Program::create(&context, &quad_vert_shader, &avalanche_calc_frag_shader);
     let avalanche_apply_program =
@@ -143,6 +202,7 @@ fn canvas_fill(
     let lookahead_program = Program::create(&context, &quad_vert_shader, &lookahead_frag_shader);
     let shift_program = Program::create(&context, &quad_vert_shader, &shift_frag_shader);
 
+    let mut quad_pipeline = QuadPipeline::create(&context, quad_program);
     let mut avalanche_calc_pipeline =
         AvalancheCalcPipeline::create(&context, avalanche_calc_program);
     let mut avalanche_apply_pipeline =
@@ -152,7 +212,7 @@ fn canvas_fill(
     let mut lookahead_pipeline = LookaheadPipeline::create(&context, lookahead_program);
     let mut shift_pipeline = ShiftPipeline::create(&context, shift_program);
 
-    let mut directions = make_avalance_directions(&context, sand_w, sand_h);
+    let mut random = make_avalance_rand(&context, sand_w, sand_h);
     let mut delta_sand = make_sand(&context, sand_w, sand_h);
     let sand = Rc::new(RefCell::new(make_sand(&context, sand_w, sand_h)));
     let lookahead = Rc::new(RefCell::new(make_shadow_lookahead(
@@ -211,9 +271,9 @@ fn canvas_fill(
 
             avalanche_calc_pipeline.set_arguments(
                 &context,
-                255.0,
+                max_height,
                 sand.borrow().read(),
-                directions.read(),
+                random.read(),
                 sand.borrow().read().texel_size(),
             );
             quad.blit(Some(delta_sand.write()));
@@ -221,7 +281,7 @@ fn canvas_fill(
 
             avalanche_apply_pipeline.set_arguments(
                 &context,
-                255.0,
+                max_height,
                 sand.borrow().read(),
                 delta_sand.read(),
                 sand.borrow().read().texel_size(),
@@ -240,12 +300,12 @@ fn canvas_fill(
 
             shift_pipeline.set_arguments(
                 &context,
-                directions.read(),
-                directions.read().texel_size(),
+                random.read(),
+                random.read().texel_size(),
                 direction,
             );
-            quad.blit(Some(directions.write()));
-            directions.swap();
+            quad.blit(Some(random.write()));
+            random.swap();
 
             set_signal_lookahead.write();
         });
@@ -273,7 +333,7 @@ fn canvas_fill(
                 &context,
                 sand.borrow().read(),
                 sand.borrow().read().texel_size(),
-                255.0,
+                max_height,
                 20.0,
                 pos,
             );
@@ -339,7 +399,7 @@ fn canvas_fill(
             sand.borrow().read(),
             lookahead.borrow().read(),
             scale,
-            (window_texel_size.0, window_texel_size.1, 1.0 / 255.0),
+            (window_texel_size.0, window_texel_size.1, 1.0 / max_height),
             (direction.0, direction.1, 46f32.to_radians().tan()),
         );
         quad.blit(None);
@@ -383,7 +443,7 @@ fn xshift(state: &mut ShiftState) -> u8 {
     state.a
 }
 
-fn make_avalance_directions(
+fn make_avalance_rand(
     context: &WebGl2RenderingContext,
     width: usize,
     height: usize,
@@ -397,9 +457,7 @@ fn make_avalance_directions(
     for _ in 0..20 {
         xshift(&mut state);
     }
-    let data: Vec<u8> = (0..(width * height))
-        .map(|_| xshift(&mut state))
-        .collect();
+    let data: Vec<u8> = (0..(width * height)).map(|_| xshift(&mut state)).collect();
 
     return SwappableTexture::create(
         context,

@@ -9,6 +9,7 @@ use std::path::Path;
 #[derive(PartialEq)]
 enum UniformType {
     Sampler2D,
+    Int,
     Float,
     Vec2,
     Vec3,
@@ -23,6 +24,7 @@ struct Uniform {
 fn get_type_token(u_type: &UniformType) -> proc_macro2::TokenStream {
     match u_type {
         UniformType::Sampler2D => "&BufferedTexture",
+        UniformType::Int => "i32",
         UniformType::Float => "f32",
         UniformType::Vec2 => "(f32, f32)",
         UniformType::Vec3 => "(f32, f32, f32)",
@@ -35,6 +37,7 @@ fn get_type_token(u_type: &UniformType) -> proc_macro2::TokenStream {
 fn get_uniform_type(type_name: &str) -> Result<UniformType, String> {
     match type_name {
         "sampler2D" => Ok(UniformType::Sampler2D),
+        "int" => Ok(UniformType::Int),
         "float" => Ok(UniformType::Float),
         "vec2" => Ok(UniformType::Vec2),
         "vec3" => Ok(UniformType::Vec3),
@@ -73,6 +76,9 @@ fn make_update_step(idx: i32, uniform: &Uniform) -> proc_macro2::TokenStream {
     let uniform_update = match uniform.u_type {
         UniformType::Float => quote! {
             context.uniform1f(#uniform_location, #name)
+        },
+        UniformType::Int => quote! {
+            context.uniform1i(#uniform_location, #name)
         },
         UniformType::Vec2 => quote! {
             context.uniform2f(#uniform_location, #name.0, #name.1)

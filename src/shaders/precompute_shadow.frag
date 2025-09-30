@@ -8,23 +8,15 @@ uniform vec2 u_direction;
 uniform vec2 u_texel_size;
 uniform float u_pass_num;
 
-vec4 get_adjacent(in vec2 uv) {
-    vec4 a = texture2D(u_texture, uv + vec2 (0.5,  0.5) * u_texel_size);
-    vec4 b = texture2D(u_texture, uv + vec2(-0.5,  0.5) * u_texel_size);
-    vec4 c = texture2D(u_texture, uv + vec2( 0.5, -0.5) * u_texel_size);
-    vec4 d = texture2D(u_texture, uv + vec2(-0.5, -0.5) * u_texel_size);
-    return max(max(a,b), max(c,d));
-}
-
 vec4 get_max_height() {
     vec4 max_height = vec4(0.0, 0.0, 0.0, 0.0);
     float step_length = pow(u_factor, u_pass_num);
     vec2 norm_direction = normalize(u_direction) * u_texel_size;
     for (int i = 0; i < 20; i++) {
-        if (float(i) >= u_factor) {
+        if (i == int(u_factor)) {
             break;
         }
-        vec4 height = get_adjacent(v_texcoord + norm_direction * float(i) * step_length);
+        vec4 height = texture2D(u_texture, v_texcoord + norm_direction * float(i) * step_length);
         max_height = max(height, max_height);
     }
     return max_height;
