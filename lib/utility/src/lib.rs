@@ -189,7 +189,7 @@ impl BufferedTexture {
         Ok(())
     }
 
-    pub fn print(&self) -> String {
+    pub fn to_string(&self) -> String {
         self.context
             .bind_framebuffer(GL::FRAMEBUFFER, self.framebuffer.as_ref());
         let mut data = vec![0; (self.width * self.height) as usize];
@@ -204,7 +204,7 @@ impl BufferedTexture {
         );
         match result {
             Ok(_) => (),
-            Err(err) => panic!("error printing: {:#?}", err),
+            Err(err) => panic!("error reading pixels: {:#?}", err),
         }
         self.context.bind_framebuffer(GL::FRAMEBUFFER, None);
         let mut out = String::new();

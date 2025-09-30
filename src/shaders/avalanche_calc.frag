@@ -19,7 +19,7 @@ vec2 get_direction(in int idx) {
     return vec2(0.0, 0.0);
 }
 
-void update_accept(out bool accept[8], in int idx, in bool value) {
+void update_accept(inout bool accept[8], in int idx, in bool value) {
     if (idx == 0) { accept[0] = value; return; }
     if (idx == 1) { accept[1] = value; return; }
     if (idx == 2) { accept[2] = value; return; }
@@ -44,7 +44,7 @@ bool get_accept(in bool accept[8], in int idx) {
 
 float movement_direction() {
     int sand = int(floor(texture2D(u_sand, v_texcoord).r * u_max_height + 0.5));
-    float rand = texture2D(u_direction, v_texcoord).r * 255.0 + 0.5;
+    float rand = texture2D(u_direction, v_texcoord).r * 255.0;
 
     bool can_accept_sand[8];
     int acceptors = 0;
