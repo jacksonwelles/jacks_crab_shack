@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::convert::Infallible;
 use std::f64::consts::PI;
@@ -11,6 +12,7 @@ use leptos::html::Canvas;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::prelude::*;
 
+use leptos_use::signal_throttled;
 use leptos_use::use_event_listener;
 
 use web_sys::HtmlElement;
@@ -85,7 +87,7 @@ pub fn App() -> impl IntoView {
             tup.2 = touch.client_y() - rect.y() as i32;
         });
     });
-    let (sun_move, set_sun_move) = signal(0);
+    let (sun_move, set_sun_move) = signal(true);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
             canvas.set_width(512);
@@ -104,15 +106,173 @@ pub fn App() -> impl IntoView {
      <canvas style:touch-action="pinch-zoom" node_ref=canvas_ref />
      <br/>
      <button
-        on:click=move |_| *set_sun_move.write() += 1
+        on:click=move |_| *set_sun_move.write() = ! sun_move.get()
     >
-        {move || {if sun_move.get() % 2 == 0 {"STOP"} else {"START"}}}
+        {move || {if sun_move.get() {"STOP"} else {"START"}}}
     </button> }
+}
+
+struct Shift {
+    context: WebGl2RenderingContext,
+    rand: Rc<RefCell<SwappableTexture>>,
+    quad: Rc<Quad>,
+    shift: ShiftPipeline,
+    tick: usize,
+}
+
+impl Shift {
+    pub fn update(&mut self) -> () {
+        let direction = if self.tick % self.rand.borrow().read().width() as usize == 0 {
+            (1.0, 1.0)
+        } else {
+            (1.0, 0.0)
+        };
+        self.tick += 1;
+
+        self.shift.set_arguments(
+            &self.context,
+            self.rand.borrow().read(),
+            self.rand.borrow().read().texel_size(),
+            direction,
+        );
+        self.quad.blit(Some(self.rand.borrow().write()));
+        self.rand.borrow_mut().swap();
+    }
+}
+struct Avalanche {
+    context: WebGl2RenderingContext,
+    sand: Rc<RefCell<SwappableTexture>>,
+    diff: SwappableTexture,
+    rand: Rc<RefCell<SwappableTexture>>,
+    quad: Rc<Quad>,
+    calc: AvalancheCalcPipeline,
+    apply: AvalancheApplyPipeline,
+    max_height: f32,
+}
+
+impl Avalanche {
+    pub fn update(&mut self) -> () {
+        self.calc.set_arguments(
+            &self.context,
+            self.max_height,
+            self.sand.borrow().read(),
+            self.rand.borrow().read(),
+            self.sand.borrow().read().texel_size(),
+        );
+        self.quad.blit(Some(self.diff.write()));
+        self.diff.swap();
+
+        self.apply.set_arguments(
+            &self.context,
+            self.max_height,
+            self.sand.borrow().read(),
+            self.diff.read(),
+            self.sand.borrow().read().texel_size(),
+        );
+
+        self.quad.blit(Some(self.sand.borrow().write()));
+        self.sand.borrow_mut().swap();
+    }
+}
+
+struct Drop {
+    context: WebGl2RenderingContext,
+    sand: Rc<RefCell<SwappableTexture>>,
+    quad: Rc<Quad>,
+    drop: DropPipeline,
+    window_w: usize,
+    window_h: usize,
+    radius: f32,
+    max_height: f32,
+}
+
+impl Drop {
+    pub fn update(&mut self, x: f32, y: f32) -> () {
+        let pos: (f32, f32) = (x / self.window_w as f32, 1.0 - y / self.window_h as f32);
+        self.drop.set_arguments(
+            &self.context,
+            self.sand.borrow().read(),
+            self.sand.borrow().read().texel_size(),
+            self.max_height,
+            20.0,
+            pos,
+        );
+        self.quad.blit(Some(&self.sand.borrow().write()));
+        self.sand.borrow_mut().swap();
+    }
+}
+
+struct LookaheadStage {
+    context: WebGl2RenderingContext,
+    sand: Rc<RefCell<SwappableTexture>>,
+    quad: Rc<Quad>,
+    lookahead: Rc<RefCell<SwappableTexture>>,
+    pipeline: LookaheadPipeline,
+    scale: f32,
+}
+
+impl LookaheadStage {
+    pub fn update(&mut self, direction: (f32, f32)) -> () {
+        self.pipeline.set_arguments(
+            &self.context,
+            self.sand.borrow().read(),
+            self.scale,
+            direction,
+            self.lookahead.borrow().read().texel_size(),
+            0.0,
+        );
+
+        self.quad.blit(Some(self.lookahead.borrow().write()));
+        self.lookahead.borrow_mut().swap();
+        for i in 1..4 {
+            self.pipeline.set_arguments(
+                &self.context,
+                self.lookahead.borrow().read(),
+                self.scale,
+                direction,
+                self.lookahead.borrow().read().texel_size(),
+                i as f32,
+            );
+            self.quad.blit(Some(self.lookahead.borrow().write()));
+            self.lookahead.borrow_mut().swap();
+        }
+    }
+}
+
+struct ShadowStage {
+    context: WebGl2RenderingContext,
+    quad: Rc<Quad>,
+    sand: Rc<RefCell<SwappableTexture>>,
+    lookahead: Rc<RefCell<SwappableTexture>>,
+    pipeline: ShadowPipeline,
+    scale: f32,
+    window_w: usize,
+    window_h: usize,
+    max_height: f32,
+    sun_angle: f32,
+}
+
+impl ShadowStage {
+    pub fn update(&mut self, direction: (f32, f32)) {
+        self.pipeline.set_arguments(
+            &self.context,
+            self.sand.borrow().read(),
+            self.lookahead.borrow().read(),
+            self.scale,
+            (
+                1.0 / self.window_w as f32,
+                1.0 / self.window_h as f32,
+                1.0 / self.max_height,
+            ),
+            (direction.0, direction.1, self.sun_angle.to_radians().tan()),
+        );
+        self.quad.blit(None);
+    }
 }
 
 fn canvas_fill(
     context: WebGl2RenderingContext,
-    sun_move: Signal<i32>,
+    sun_move: Signal<bool>,
     mouse: Signal<(bool, i32, i32)>,
 ) {
     let quad_vert_shader = compile_shader(
@@ -179,8 +339,6 @@ fn canvas_fill(
     let scale = 4.0f32;
     let max_height = 255.0f32;
 
-    let window_texel_size = (1.0 / window_w as f32, 1.0 / window_h as f32);
-
     let quad_program = Program::create(&context, &quad_vert_shader, &quad_frag_shader);
     let avalanche_calc_program =
         Program::create(&context, &quad_vert_shader, &avalanche_calc_frag_shader);
@@ -191,18 +349,17 @@ fn canvas_fill(
     let lookahead_program = Program::create(&context, &quad_vert_shader, &lookahead_frag_shader);
     let shift_program = Program::create(&context, &quad_vert_shader, &shift_frag_shader);
 
-    let mut quad_pipeline = QuadPipeline::create(&context, quad_program);
-    let mut avalanche_calc_pipeline =
-        AvalancheCalcPipeline::create(&context, avalanche_calc_program);
-    let mut avalanche_apply_pipeline =
+    let quad_pipeline = QuadPipeline::create(&context, quad_program);
+    let avalanche_calc_pipeline = AvalancheCalcPipeline::create(&context, avalanche_calc_program);
+    let avalanche_apply_pipeline =
         AvalancheApplyPipeline::create(&context, avalanche_apply_program);
-    let mut shadow_pipeline = ShadowPipeline::create(&context, shadow_program);
-    let mut drop_pipeline = DropPipeline::create(&context, drop_program);
-    let mut lookahead_pipeline = LookaheadPipeline::create(&context, lookahead_program);
-    let mut shift_pipeline = ShiftPipeline::create(&context, shift_program);
+    let shadow_pipeline = ShadowPipeline::create(&context, shadow_program);
+    let drop_pipeline = DropPipeline::create(&context, drop_program);
+    let lookahead_pipeline = LookaheadPipeline::create(&context, lookahead_program);
+    let shift_pipeline = ShiftPipeline::create(&context, shift_program);
 
-    let mut random = make_avalance_rand(&context, sand_w, sand_h);
-    let mut delta_sand = make_sand(&context, sand_w, sand_h);
+    let random = Rc::new(RefCell::new(make_avalance_rand(&context, sand_w, sand_h)));
+    let delta_sand = make_sand(&context, sand_w, sand_h);
     let sand = Rc::new(RefCell::new(make_sand(&context, sand_w, sand_h)));
     let lookahead = Rc::new(RefCell::new(make_shadow_lookahead(
         &context, window_w, window_h,
@@ -214,184 +371,101 @@ fn canvas_fill(
         *set_next_frame.write();
     });
 
-    // TODO use_leptos has throttled signals that would probably be perfect for this
-    let (signal_lookahead, set_signal_lookahead) = signal(());
     let (signal_drop, set_signal_drop) = signal(());
-    let (signal_avalanche, set_signal_avalanche) = signal(());
-    let (angle, set_angle) = signal(0.0);
+    let signal_drop_throttled: Signal<()> = signal_throttled(signal_drop, 16.0);
+    let angle = Rc::new(Cell::new(0.0));
 
     let mut prev_time = None::<f64>;
 
-    Effect::new(move || {
-        next_frame.get();
-        let now = window().performance().unwrap().now();
-        if sun_move.get_untracked() % 2 == 0 {
-            if prev_time.is_some() {
-                *set_angle.write() += (now - prev_time.unwrap()) % 20000.0 * (PI / 10000.0);
+    //TODO don't need to trigger lookahead from so many places. just update at 60 hz and call it a day
+    {
+        let angle = angle.clone();
+        Effect::new(move || {
+            next_frame.get();
+            let now = window().performance().unwrap().now();
+            if sun_move.get_untracked() {
+                if prev_time.is_some() {
+                    angle.update(|x| x + (now - prev_time.unwrap()) % 20000.0 * (PI / 10000.0));
+                }
             }
-            set_signal_lookahead.write();
-        }
-        if mouse.get_untracked().0 {
-            set_signal_drop.write();
-        }
-        set_signal_avalanche.write();
-        prev_time = Some(now);
-        request_animation_frame(move || {
-            *set_next_frame.write();
+            if mouse.get_untracked().0 {
+                set_signal_drop.write();
+            }
+            prev_time = Some(now);
+            request_animation_frame(move || {
+                *set_next_frame.write();
+            });
         });
-    });
+    }
 
     let quad = Rc::new(Quad::create(&context));
 
-    // avalance the sand
-    let mut prev_avalanche = None::<f64>;
-    let mut tick = 0;
-    {
-        let context = context.clone();
-        let sand = sand.clone();
-        let quad = quad.clone();
-        Effect::new(move || {
-            signal_avalanche.get();
-            let now = window().performance().unwrap().now();
-            if prev_avalanche.is_some() && now - prev_avalanche.unwrap() < 0.0 {
-                return;
-            }
-            prev_avalanche = Some(now);
+    let mut avalanche_stage = Avalanche {
+        context: context.clone(),
+        sand: sand.clone(),
+        diff: delta_sand,
+        rand: random.clone(),
+        quad: quad.clone(),
+        calc: avalanche_calc_pipeline,
+        apply: avalanche_apply_pipeline,
+        max_height,
+    };
 
-            avalanche_calc_pipeline.set_arguments(
-                &context,
-                max_height,
-                sand.borrow().read(),
-                random.read(),
-                sand.borrow().read().texel_size(),
-            );
-            quad.blit(Some(delta_sand.write()));
-            delta_sand.swap();
+    let mut shift_stage = Shift {
+        context: context.clone(),
+        rand: random.clone(),
+        quad: quad.clone(),
+        shift: shift_pipeline,
+        tick: 0,
+    };
 
-            avalanche_apply_pipeline.set_arguments(
-                &context,
-                max_height,
-                sand.borrow().read(),
-                delta_sand.read(),
-                sand.borrow().read().texel_size(),
-            );
+    let mut drop_stage = Drop {
+        context: context.clone(),
+        sand: sand.clone(),
+        quad: quad.clone(),
+        drop: drop_pipeline,
+        window_w,
+        window_h,
+        radius: 20.0,
+        max_height,
+    };
 
-            quad.blit(Some(sand.borrow().write()));
-            sand.borrow_mut().swap();
+    let mut lookahead_stage = LookaheadStage {
+        context: context.clone(),
+        sand: sand.clone(),
+        quad: quad.clone(),
+        lookahead: lookahead.clone(),
+        pipeline: lookahead_pipeline,
+        scale,
+    };
 
-            let direction = if tick == sand_w - 1 {
-                tick = 0;
-                (1.0, 1.0)
-            } else {
-                tick += 1;
-                (1.0, 0.0)
-            };
+    let mut shadow_stage = ShadowStage {
+        context: context.clone(),
+        quad: quad.clone(),
+        sand: sand.clone(),
+        lookahead: lookahead.clone(),
+        pipeline: shadow_pipeline,
+        scale,
+        window_w,
+        window_h,
+        max_height,
+        sun_angle: 46.0,
+    };
 
-            shift_pipeline.set_arguments(
-                &context,
-                random.read(),
-                random.read().texel_size(),
-                direction,
-            );
-            quad.blit(Some(random.write()));
-            random.swap();
-
-            set_signal_lookahead.write();
-        });
-    }
-
-    // Drop sand
-    let mut prev_drop = None::<f64>;
-    {
-        let context = context.clone();
-        let sand = sand.clone();
-        let quad = quad.clone();
-        Effect::new(move || {
-            signal_drop.get();
-            let now = window().performance().unwrap().now();
-            if prev_drop.is_some() && now - prev_drop.unwrap() < 16.0 {
-                return;
-            }
-            prev_drop = Some(now);
-            let (_, mouse_x, mouse_y) = mouse.get_untracked();
-            let pos: (f32, f32) = (
-                mouse_x as f32 / window_w as f32,
-                1.0 - mouse_y as f32 / window_h as f32,
-            );
-            drop_pipeline.set_arguments(
-                &context,
-                sand.borrow().read(),
-                sand.borrow().read().texel_size(),
-                max_height,
-                20.0,
-                pos,
-            );
-            quad.blit(Some(&sand.borrow().write()));
-            sand.borrow_mut().swap();
-            set_signal_lookahead.write();
-        });
-    }
-
-    // Update the lookahead texture
-    let mut prev_lookahead = None::<f64>;
-    {
-        let context = context.clone();
-        let sand = sand.clone();
-        let quad = quad.clone();
-        let lookahead = lookahead.clone();
-        Effect::new(move || {
-            signal_lookahead.get();
-            let now = window().performance().unwrap().now();
-            if prev_lookahead.is_some() && now - prev_lookahead.unwrap() < 16.0 {
-                return;
-            }
-            prev_lookahead = Some(now);
-            let direction = (
-                angle.get_untracked().cos() as f32,
-                angle.get_untracked().sin() as f32,
-            );
-            lookahead_pipeline.set_arguments(
-                &context,
-                sand.borrow().read(),
-                scale,
-                direction,
-                lookahead.borrow().read().texel_size(),
-                0.0,
-            );
-
-            quad.blit(Some(lookahead.borrow().write()));
-            lookahead.borrow_mut().swap();
-            for i in 1..4 {
-                lookahead_pipeline.set_arguments(
-                    &context,
-                    lookahead.borrow().read(),
-                    scale,
-                    direction,
-                    lookahead.borrow().read().texel_size(),
-                    i as f32,
-                );
-                quad.blit(Some(lookahead.borrow().write()));
-                lookahead.borrow_mut().swap();
-            }
-        });
-    }
+    Effect::new(move || {
+        signal_drop_throttled.get();
+        let (_, x, y) = mouse.get_untracked();
+        drop_stage.update(x as f32, y as f32);
+    });
 
     Effect::new(move || {
         next_frame.get();
-        let direction = (
-            angle.get_untracked().cos() as f32,
-            angle.get_untracked().sin() as f32,
-        );
+        let direction = (angle.get().cos() as f32, angle.get().sin() as f32);
 
-        shadow_pipeline.set_arguments(
-            &context,
-            sand.borrow().read(),
-            lookahead.borrow().read(),
-            scale,
-            (window_texel_size.0, window_texel_size.1, 1.0 / max_height),
-            (direction.0, direction.1, 46f32.to_radians().tan()),
-        );
-        quad.blit(None);
+        avalanche_stage.update();
+        lookahead_stage.update(direction);
+        shadow_stage.update(direction);
+        shift_stage.update();
     });
 }
 

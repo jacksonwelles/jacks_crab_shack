@@ -189,6 +189,14 @@ impl BufferedTexture {
         Ok(())
     }
 
+    pub fn width(&self) -> i32 {
+        self.width
+    }
+
+    pub fn height(&self) -> i32 {
+        self.height
+    }
+
     pub fn to_string(&self) -> String {
         self.context
             .bind_framebuffer(GL::FRAMEBUFFER, self.framebuffer.as_ref());
