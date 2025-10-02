@@ -98,5 +98,6 @@ void main() {
         }
         level = min(level + 1.0, 3.0);
     }
-    gl_FragColor = LIGHT + (DARK - LIGHT) * shadowed;
+    //gl_FragColor = LIGHT + (DARK - LIGHT) * shadowed;
+    gl_FragColor = vec4(shadowed, 0.0, 0.0, 1.0);
 }
