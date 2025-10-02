@@ -34,8 +34,6 @@ render_pipeline!(LookaheadPipeline, "shaders/precompute_shadow.frag");
 
 render_pipeline!(ShiftPipeline, "shaders/shift_rand.frag");
 
-render_pipeline!(SmoothPipeline, "shaders/smooth.frag");
-
 render_pipeline!(DrawPipeline, "shaders/draw.frag");
 
 #[component]
@@ -207,7 +205,7 @@ impl DropStage {
 
 struct LookaheadStage {
     context: WebGl2RenderingContext,
-    smooth_sand: Rc<BufferedTexture>,
+    sand: Rc<RefCell<SwappableTexture>>,
     quad: Rc<Quad>,
     lookahead: Rc<RefCell<SwappableTexture>>,
     pipeline: LookaheadPipeline,
@@ -218,7 +216,7 @@ impl LookaheadStage {
     pub fn update(&mut self, direction: (f32, f32)) -> () {
         self.pipeline.set_arguments(
             &self.context,
-            &self.smooth_sand,
+            &self.sand.borrow().read(),
             self.scale,
             direction,
             self.lookahead.borrow().read().texel_size(),
@@ -242,29 +240,10 @@ impl LookaheadStage {
     }
 }
 
-struct SmoothStage {
-    context: WebGl2RenderingContext,
-    quad: Rc<Quad>,
-    sand: Rc<RefCell<SwappableTexture>>,
-    smooth_sand: Rc<BufferedTexture>,
-    pipeline: SmoothPipeline,
-}
-
-impl SmoothStage {
-    pub fn update(&mut self) -> () {
-        self.pipeline.set_arguments(
-            &self.context,
-            self.sand.borrow().read(),
-            self.sand.borrow().read().texel_size(),
-        );
-        self.quad.blit(Some(&self.smooth_sand));
-    }
-}
-
 struct ShadowStage {
     context: WebGl2RenderingContext,
     quad: Rc<Quad>,
-    smooth_sand: Rc<BufferedTexture>,
+    sand: Rc<RefCell<SwappableTexture>>,
     shadow: Rc<BufferedTexture>,
     lookahead: Rc<RefCell<SwappableTexture>>,
     pipeline: ShadowPipeline,
@@ -277,7 +256,7 @@ impl ShadowStage {
     pub fn update(&mut self, direction: (f32, f32)) {
         self.pipeline.set_arguments(
             &self.context,
-            &self.smooth_sand,
+            &self.sand.borrow().read(),
             self.lookahead.borrow().read(),
             self.scale,
             (
@@ -324,6 +303,7 @@ fn canvas_fill(
     mouse: Signal<(bool, i32, i32)>,
 ) {
     context.get_extension("EXT_color_buffer_float").unwrap();
+    context.get_extension("OES_texture_float_linear").unwrap();
     let quad_vert_shader = compile_shader(
         &context,
         GL::VERTEX_SHADER,
@@ -380,13 +360,6 @@ fn canvas_fill(
     )
     .unwrap();
 
-    let smooth_frag_shader = compile_shader(
-        &context,
-        GL::FRAGMENT_SHADER,
-        include_str!("shaders/smooth.frag"),
-    )
-    .unwrap();
-
     let draw_frag_shader = compile_shader(
         &context,
         GL::FRAGMENT_SHADER,
@@ -413,7 +386,6 @@ fn canvas_fill(
     let drop_program = Program::create(&context, &quad_vert_shader, &drop_frag_shader);
     let lookahead_program = Program::create(&context, &quad_vert_shader, &lookahead_frag_shader);
     let shift_program = Program::create(&context, &quad_vert_shader, &shift_frag_shader);
-    let smooth_program = Program::create(&context, &quad_vert_shader, &smooth_frag_shader);
     let draw_program = Program::create(&context, &quad_vert_shader, &draw_frag_shader);
 
     let avalanche_calc_pipeline = AvalancheCalcPipeline::create(&context, avalanche_calc_program);
@@ -423,14 +395,12 @@ fn canvas_fill(
     let drop_pipeline = DropPipeline::create(&context, drop_program);
     let lookahead_pipeline = LookaheadPipeline::create(&context, lookahead_program);
     let shift_pipeline = ShiftPipeline::create(&context, shift_program);
-    let smooth_pipeline = SmoothPipeline::create(&context, smooth_program);
     let draw_pipeline = DrawPipeline::create(&context, draw_program);
 
     let shadow = Rc::new(make_shadow(&context, window_w, window_w));
     let random = Rc::new(RefCell::new(make_avalance_rand(&context, sand_w, sand_h)));
     let delta_sand = make_sand(&context, sand_w, sand_h);
     let sand = Rc::new(RefCell::new(make_sand(&context, sand_w, sand_h)));
-    let smooth_sand = Rc::new(make_smooth_sand(&context, sand_w, sand_h));
     let lookahead = Rc::new(RefCell::new(make_shadow_lookahead(
         &context, window_w, window_h,
     )));
@@ -499,17 +469,9 @@ fn canvas_fill(
         max_height,
     };
 
-    let mut smooth_stage = SmoothStage {
-        context: context.clone(),
-        quad: quad.clone(),
-        sand: sand.clone(),
-        smooth_sand: smooth_sand.clone(),
-        pipeline: smooth_pipeline,
-    };
-
     let mut lookahead_stage = LookaheadStage {
         context: context.clone(),
-        smooth_sand: smooth_sand.clone(),
+        sand: sand.clone(),
         quad: quad.clone(),
         lookahead: lookahead.clone(),
         pipeline: lookahead_pipeline,
@@ -520,7 +482,7 @@ fn canvas_fill(
         context: context.clone(),
         quad: quad.clone(),
         shadow: shadow.clone(),
-        smooth_sand: smooth_sand.clone(),
+        sand: sand.clone(),
         lookahead: lookahead.clone(),
         pipeline: shadow_pipeline,
         scale,
@@ -540,7 +502,10 @@ fn canvas_fill(
 
     Effect::new(move || {
         signal_drop_throttled.get();
-        let (_, x, y) = mouse.get_untracked();
+        let (active, x, y) = mouse.get_untracked();
+        if !active {
+            return;
+        }
         drop_stage.update(x as f32, y as f32);
     });
 
@@ -549,7 +514,6 @@ fn canvas_fill(
         let direction = (angle.get().cos() as f32, angle.get().sin() as f32);
 
         avalanche_stage.update();
-        smooth_stage.update();
         lookahead_stage.update(direction);
         shadow_stage.update(direction);
         draw_stage.update(direction);
@@ -582,12 +546,12 @@ fn make_sand(context: &WebGl2RenderingContext, width: usize, height: usize) -> S
         context,
         GL::TEXTURE_2D,
         0,
-        GL::R8,
+        GL::R16F,
         width as i32,
         height as i32,
         0,
         GL::RED,
-        GL::UNSIGNED_BYTE,
+        GL::HALF_FLOAT,
         None::<Infallible>,
         &[
             (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
@@ -641,31 +605,6 @@ fn make_avalance_rand(
         GL::RED,
         GL::UNSIGNED_BYTE,
         Some(ArrayView::create(&data)),
-        &[
-            (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
-            (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
-            (GL::TEXTURE_WRAP_S, GL::REPEAT),
-            (GL::TEXTURE_WRAP_T, GL::REPEAT),
-        ],
-    );
-}
-
-fn make_smooth_sand(
-    context: &WebGl2RenderingContext,
-    width: usize,
-    height: usize,
-) -> BufferedTexture {
-    return BufferedTexture::create(
-        context,
-        GL::TEXTURE_2D,
-        0,
-        GL::R16F,
-        width as i32,
-        height as i32,
-        0,
-        GL::RED,
-        GL::HALF_FLOAT,
-        None::<Infallible>,
         &[
             (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
             (GL::TEXTURE_MAG_FILTER, GL::NEAREST),
