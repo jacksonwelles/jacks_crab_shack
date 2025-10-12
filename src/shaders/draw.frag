@@ -31,5 +31,11 @@ void main() {
 
     float diffuse = max(0.0, dot(normalize(u_direction), get_normal()));
 
-    gl_FragColor = DARK + (LIGHT - DARK) * diffuse * (1.0-shadow);
+    float windborn_sand = texture2D(u_sand, v_texcoord).y;
+    if (windborn_sand > 10.0) {
+        gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+    } else {
+       gl_FragColor = DARK + (LIGHT - DARK) * diffuse * (1.0-shadow);
+    }
+
 }

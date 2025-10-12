@@ -44,7 +44,7 @@ bool get_accept(in bool accept[8], in int idx) {
 
 float movement_direction() {
     int sand = int(floor(texture2D(u_sand, v_texcoord).r * u_max_height + 0.5));
-    float rand = texture2D(u_direction, v_texcoord).r * 255.0;
+    float rand = floor(texture2D(u_direction, v_texcoord).r * 8.0 + 0.5);
 
     bool can_accept_sand[8];
     int acceptors = 0;
@@ -61,15 +61,15 @@ float movement_direction() {
         }
     }
     if (acceptors == 0) {
-        return 8.0 / 255.0;
+        return 1.0;
     }
     int selection = int(mod(rand, float(acceptors)));
     for (int i = 0; i < 8; i++) {
         if (get_accept(can_accept_sand, i) && selection-- == 0) {
-            return float(i) / 255.0;
+            return float(i) / 8.0;
         }
     }
-    return 8.0 / 255.0;
+    return 1.0;
 }
 
 void main() {

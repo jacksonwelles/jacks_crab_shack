@@ -23,7 +23,7 @@ vec2 get_direction(in int idx) {
 
 float new_height() {
     int sand = int(floor(texture2D(u_sand, v_texcoord).r * u_max_height + 0.5));
-    int move_dir = int(floor(texture2D(u_delta, v_texcoord).r * 255.0 + 0.5));
+    int move_dir = int(floor(texture2D(u_delta, v_texcoord).r * 8.0 + 0.5));
 
     int change_in_sand = 0;
     if (move_dir != 8) {
@@ -34,7 +34,7 @@ float new_height() {
         int neighbor_dir = int(floor(texture2D(
             u_delta,
             v_texcoord + get_direction(i) * u_texel_size
-        ).r * 255.0 + 0.5));
+        ).r * 8.0 + 0.5));
         if (neighbor_dir == 8) {
             continue;
         }

@@ -34,6 +34,8 @@ render_pipeline!(LookaheadPipeline, "shaders/precompute_shadow.frag");
 
 render_pipeline!(ShiftPipeline, "shaders/shift_rand.frag");
 
+render_pipeline!(WindPipeline, "shaders/wind.frag");
+
 render_pipeline!(DrawPipeline, "shaders/draw.frag");
 
 #[component]
@@ -91,8 +93,8 @@ pub fn App() -> impl IntoView {
     let (sun_move, set_sun_move) = signal(true);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
-            canvas.set_width(512);
-            canvas.set_height(512);
+            canvas.set_width(1024);
+            canvas.set_height(1024);
             let context = canvas
                 .get_context("webgl2")
                 .expect("get_context")
@@ -270,6 +272,36 @@ impl ShadowStage {
     }
 }
 
+struct WindStage {
+    context: WebGl2RenderingContext,
+    quad: Rc<Quad>,
+    sand: Rc<RefCell<SwappableTexture>>,
+    shadow: Rc<BufferedTexture>,
+    random: Rc<RefCell<SwappableTexture>>,
+    pipeline: WindPipeline,
+    max_height: f32,
+    pickup_rate: f32,
+    wind_speed: f32,
+}
+
+impl WindStage {
+    pub fn update(&mut self, direction: (f32, f32)) {
+        self.pipeline.set_arguments(
+            &self.context,
+            direction,
+            self.sand.borrow().read().texel_size(),
+            self.wind_speed,
+            self.max_height,
+            self.sand.borrow().read(),
+            &self.random.borrow().read(),
+            &self.shadow,
+            self.pickup_rate,
+        );
+        self.quad.blit(Some(self.sand.borrow().write()));
+        self.sand.borrow_mut().swap();
+    }
+}
+
 struct DrawStage {
     context: WebGl2RenderingContext,
     quad: Rc<Quad>,
@@ -360,6 +392,13 @@ fn canvas_fill(
     )
     .unwrap();
 
+    let wind_frag_shader = compile_shader(
+        &context,
+        GL::FRAGMENT_SHADER,
+        include_str!("shaders/wind.frag"),
+    )
+    .unwrap();
+
     let draw_frag_shader = compile_shader(
         &context,
         GL::FRAGMENT_SHADER,
@@ -374,9 +413,11 @@ fn canvas_fill(
     let sand_h = window_h;
     let scale = 4.0f32;
     let max_height = 255.0f32;
-    let sun_angle = 46.0f32;
+    let sun_angle = 38.0f32;
     let radius = 20.0;
     let drop_period = 16.0;
+    let wind_speed = 0.001;
+    let pickup_rate = 0.1;
 
     let avalanche_calc_program =
         Program::create(&context, &quad_vert_shader, &avalanche_calc_frag_shader);
@@ -387,6 +428,7 @@ fn canvas_fill(
     let lookahead_program = Program::create(&context, &quad_vert_shader, &lookahead_frag_shader);
     let shift_program = Program::create(&context, &quad_vert_shader, &shift_frag_shader);
     let draw_program = Program::create(&context, &quad_vert_shader, &draw_frag_shader);
+    let wind_program = Program::create(&context, &quad_vert_shader, &wind_frag_shader);
 
     let avalanche_calc_pipeline = AvalancheCalcPipeline::create(&context, avalanche_calc_program);
     let avalanche_apply_pipeline =
@@ -396,6 +438,7 @@ fn canvas_fill(
     let lookahead_pipeline = LookaheadPipeline::create(&context, lookahead_program);
     let shift_pipeline = ShiftPipeline::create(&context, shift_program);
     let draw_pipeline = DrawPipeline::create(&context, draw_program);
+    let wind_pipeline = WindPipeline::create(&context, wind_program);
 
     let shadow = Rc::new(make_shadow(&context, window_w, window_w));
     let random = Rc::new(RefCell::new(make_avalance_rand(&context, sand_w, sand_h)));
@@ -500,6 +543,18 @@ fn canvas_fill(
         sun_angle,
     };
 
+    let mut wind_stage = WindStage{
+        context: context.clone(),
+        quad: quad.clone(),
+        shadow: shadow.clone(),
+        sand: sand.clone(),
+        pipeline: wind_pipeline,
+        random: random.clone(),
+        max_height,
+        pickup_rate,
+        wind_speed
+    };
+
     Effect::new(move || {
         signal_drop_throttled.get();
         let (active, x, y) = mouse.get_untracked();
@@ -517,6 +572,7 @@ fn canvas_fill(
         lookahead_stage.update(direction);
         shadow_stage.update(direction);
         draw_stage.update(direction);
+        // wind_stage.update(direction);
         shift_stage.update();
     });
 }
@@ -546,11 +602,11 @@ fn make_sand(context: &WebGl2RenderingContext, width: usize, height: usize) -> S
         context,
         GL::TEXTURE_2D,
         0,
-        GL::R16F,
+        GL::RG16F,
         width as i32,
         height as i32,
         0,
-        GL::RED,
+        GL::RG,
         GL::HALF_FLOAT,
         None::<Infallible>,
         &[
