@@ -1,15 +1,15 @@
+#version 300 es
+
 precision highp float;
 
-varying vec2 v_texcoord;
+in vec2 v_texcoord;
+out vec4 fragColor;
 
 uniform sampler2D u_sand;
 uniform sampler2D u_lookahead;
 uniform float u_scale;
 uniform vec3 u_voxel_size;
 uniform vec3 u_direction;
-
-const vec4 DARK = vec4(0.502, 0.467, 0.361, 1.0);
-const vec4 LIGHT = vec4(0.796, 0.741, 0.576, 1.0);
 
 float bilerp(in vec4 neighbors, in vec2 fuv) {
     return min(
@@ -27,10 +27,10 @@ void sample_neighbors(out vec4 neighbors, out vec2 fuv, in sampler2D tex, in vec
     vec2 iuv = floor(st);
     fuv = fract(st);
 
-    vec4 a = texture2D(tex, (iuv + vec2(0.5, 0.5)) * u_voxel_size.xy);
-    vec4 b = texture2D(tex, (iuv + vec2(1.5, 0.5)) * u_voxel_size.xy);
-    vec4 c = texture2D(tex, (iuv + vec2(0.5, 1.5)) * u_voxel_size.xy);
-    vec4 d = texture2D(tex, (iuv + vec2(1.5, 1.5)) * u_voxel_size.xy);
+    vec4 a = texture(tex, (iuv + vec2(0.5, 0.5)) * u_voxel_size.xy);
+    vec4 b = texture(tex, (iuv + vec2(1.5, 0.5)) * u_voxel_size.xy);
+    vec4 c = texture(tex, (iuv + vec2(0.5, 1.5)) * u_voxel_size.xy);
+    vec4 d = texture(tex, (iuv + vec2(1.5, 1.5)) * u_voxel_size.xy);
 
     if (level == 0.0) {
         neighbors = vec4(a[0], b[0], c[0], d[0]);
@@ -70,7 +70,7 @@ void main() {
         u_direction / length(u_direction.xy)
     );
 
-    vec3 pos = vec3(v_texcoord.x, v_texcoord.y, texture2D(u_sand, v_texcoord).r);
+    vec3 pos = vec3(v_texcoord.x, v_texcoord.y, texture(u_sand, v_texcoord).r);
     float level = 3.0;
     float shadowed = 0.0;
     for (int _ = 0; _ < 4096; _++) {
@@ -98,6 +98,5 @@ void main() {
         }
         level = min(level + 1.0, 3.0);
     }
-    //gl_FragColor = LIGHT + (DARK - LIGHT) * shadowed;
-    gl_FragColor = vec4(shadowed, 0.0, 0.0, 1.0);
+    fragColor = vec4(shadowed, 0.0, 0.0, 1.0);
 }

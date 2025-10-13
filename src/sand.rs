@@ -32,7 +32,7 @@ render_pipeline!(ShadowPipeline, "shaders/optimized_shadow.frag");
 
 render_pipeline!(LookaheadPipeline, "shaders/precompute_shadow.frag");
 
-render_pipeline!(ShiftPipeline, "shaders/shift_rand.frag");
+render_pipeline!(RandomPipeline, "shaders/random.frag");
 
 render_pipeline!(WindPipeline, "shaders/wind.frag");
 
@@ -115,51 +115,40 @@ pub fn App() -> impl IntoView {
     </button> }
 }
 
-struct Shift {
+struct RandomStage {
     context: WebGl2RenderingContext,
-    rand: Rc<RefCell<SwappableTexture>>,
+    rand: Rc<BufferedTexture>,
     quad: Rc<Quad>,
-    shift: ShiftPipeline,
-    tick: usize,
+    pipeline: RandomPipeline,
 }
 
-impl Shift {
+impl RandomStage {
     pub fn update(&mut self) -> () {
-        let direction = if self.tick % self.rand.borrow().read().width() as usize == 0 {
-            (1.0, 1.0)
-        } else {
-            (1.0, 0.0)
-        };
-        self.tick += 1;
-
-        self.shift.set_arguments(
+        self.pipeline.set_arguments(
             &self.context,
-            self.rand.borrow().read(),
-            self.rand.borrow().read().texel_size(),
-            direction,
+            window().performance().unwrap().now() as f32
         );
-        self.quad.blit(Some(self.rand.borrow().write()));
-        self.rand.borrow_mut().swap();
+        self.quad.blit(Some(&self.rand));
     }
 }
-struct Avalanche {
+struct AvalancheStage {
     context: WebGl2RenderingContext,
     sand: Rc<RefCell<SwappableTexture>>,
     diff: SwappableTexture,
-    rand: Rc<RefCell<SwappableTexture>>,
+    rand: Rc<BufferedTexture>,
     quad: Rc<Quad>,
     calc: AvalancheCalcPipeline,
     apply: AvalancheApplyPipeline,
     max_height: f32,
 }
 
-impl Avalanche {
+impl AvalancheStage {
     pub fn update(&mut self) -> () {
         self.calc.set_arguments(
             &self.context,
             self.max_height,
             self.sand.borrow().read(),
-            self.rand.borrow().read(),
+            &self.rand,
             self.sand.borrow().read().texel_size(),
         );
         self.quad.blit(Some(self.diff.write()));
@@ -277,7 +266,7 @@ struct WindStage {
     quad: Rc<Quad>,
     sand: Rc<RefCell<SwappableTexture>>,
     shadow: Rc<BufferedTexture>,
-    random: Rc<RefCell<SwappableTexture>>,
+    random: Rc<BufferedTexture>,
     pipeline: WindPipeline,
     max_height: f32,
     pickup_rate: f32,
@@ -293,7 +282,7 @@ impl WindStage {
             self.wind_speed,
             self.max_height,
             self.sand.borrow().read(),
-            &self.random.borrow().read(),
+            &self.random,
             &self.shadow,
             self.pickup_rate,
         );
@@ -388,7 +377,7 @@ fn canvas_fill(
     let shift_frag_shader = compile_shader(
         &context,
         GL::FRAGMENT_SHADER,
-        include_str!("shaders/shift_rand.frag"),
+        include_str!("shaders/random.frag"),
     )
     .unwrap();
 
@@ -414,7 +403,7 @@ fn canvas_fill(
     let scale = 4.0f32;
     let max_height = 255.0f32;
     let sun_angle = 38.0f32;
-    let radius = 20.0;
+    let radius = 200.0;
     let drop_period = 16.0;
     let wind_speed = 0.001;
     let pickup_rate = 0.1;
@@ -436,12 +425,12 @@ fn canvas_fill(
     let shadow_pipeline = ShadowPipeline::create(&context, shadow_program);
     let drop_pipeline = DropPipeline::create(&context, drop_program);
     let lookahead_pipeline = LookaheadPipeline::create(&context, lookahead_program);
-    let shift_pipeline = ShiftPipeline::create(&context, shift_program);
+    let random_pipeline = RandomPipeline::create(&context, shift_program);
     let draw_pipeline = DrawPipeline::create(&context, draw_program);
     let wind_pipeline = WindPipeline::create(&context, wind_program);
 
     let shadow = Rc::new(make_shadow(&context, window_w, window_w));
-    let random = Rc::new(RefCell::new(make_avalance_rand(&context, sand_w, sand_h)));
+    let random = Rc::new(make_rand(&context, sand_w, sand_h));
     let delta_sand = make_sand(&context, sand_w, sand_h);
     let sand = Rc::new(RefCell::new(make_sand(&context, sand_w, sand_h)));
     let lookahead = Rc::new(RefCell::new(make_shadow_lookahead(
@@ -482,7 +471,7 @@ fn canvas_fill(
 
     let quad = Rc::new(Quad::create(&context));
 
-    let mut avalanche_stage = Avalanche {
+    let mut avalanche_stage = AvalancheStage {
         context: context.clone(),
         sand: sand.clone(),
         diff: delta_sand,
@@ -493,12 +482,11 @@ fn canvas_fill(
         max_height,
     };
 
-    let mut shift_stage = Shift {
+    let mut random_stage = RandomStage {
         context: context.clone(),
         rand: random.clone(),
         quad: quad.clone(),
-        shift: shift_pipeline,
-        tick: 0,
+        pipeline: random_pipeline,
     };
 
     let mut drop_stage = DropStage {
@@ -572,8 +560,8 @@ fn canvas_fill(
         lookahead_stage.update(direction);
         shadow_stage.update(direction);
         draw_stage.update(direction);
-        // wind_stage.update(direction);
-        shift_stage.update();
+        wind_stage.update(direction);
+        random_stage.update();
     });
 }
 
@@ -602,12 +590,12 @@ fn make_sand(context: &WebGl2RenderingContext, width: usize, height: usize) -> S
         context,
         GL::TEXTURE_2D,
         0,
-        GL::RG16F,
+        GL::RG32F,
         width as i32,
         height as i32,
         0,
         GL::RG,
-        GL::HALF_FLOAT,
+        GL::FLOAT,
         None::<Infallible>,
         &[
             (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
@@ -625,42 +613,22 @@ struct ShiftState {
     a: u8,
 }
 
-fn xshift(state: &mut ShiftState) -> u8 {
-    let t = state.x ^ (state.x << 5);
-    state.x = state.y;
-    state.y = state.z;
-    state.z = state.a;
-    state.a = state.z ^ (state.z >> 1) ^ t ^ (t << 3);
-    state.a
-}
-
-fn make_avalance_rand(
+fn make_rand(
     context: &WebGl2RenderingContext,
     width: usize,
     height: usize,
-) -> SwappableTexture {
-    let mut state = ShiftState {
-        x: 0,
-        y: 0,
-        z: 0,
-        a: 1,
-    };
-    for _ in 0..20 {
-        xshift(&mut state);
-    }
-    let data: Vec<u8> = (0..(width * height)).map(|_| xshift(&mut state)).collect();
-
-    return SwappableTexture::create(
+) -> BufferedTexture {
+    return BufferedTexture::create(
         context,
         GL::TEXTURE_2D,
         0,
-        GL::R8,
+        GL::R32F,
         width as i32,
         height as i32,
         0,
         GL::RED,
-        GL::UNSIGNED_BYTE,
-        Some(ArrayView::create(&data)),
+        GL::FLOAT,
+        None::<Infallible>,
         &[
             (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
             (GL::TEXTURE_MAG_FILTER, GL::NEAREST),

@@ -54,7 +54,12 @@ fn make_setup_step(idx: i32, uniform: &Uniform) -> Option<proc_macro2::TokenStre
                 program
                     .uniforms()
                     .get(stringify!(#name))
-                    .expect(format!("set up for '{}', uniforms are {:#?}", stringify!(#name), program.uniforms()).as_str())
+                    .expect(
+                        format!(
+                            "set up for '{}', uniforms are {:#?}",
+                            stringify!(#name),
+                            program.uniforms()
+                        ).as_str())
                     .into(),
                 #idx
             )
@@ -71,7 +76,9 @@ fn make_update_step(idx: i32, uniform: &Uniform) -> proc_macro2::TokenStream {
         };
     }
     let uniform_location = quote! {
-        self.program.uniforms().get(stringify!(#name)).expect(format!("uniform location for '{}'", stringify!(#name)).as_str()).into()
+        self.program.uniforms()
+            .get(stringify!(#name))
+            .expect(format!("uniform location for '{}'", stringify!(#name)).as_str()).into()
     };
     let uniform_update = match uniform.u_type {
         UniformType::Float => quote! {

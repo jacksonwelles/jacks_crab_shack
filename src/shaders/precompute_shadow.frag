@@ -1,6 +1,9 @@
+#version 300 es
+
 precision highp float;
 
-varying vec2 v_texcoord;
+in vec2 v_texcoord;
+out vec4 fragColor;
 
 uniform sampler2D u_texture;
 uniform float u_factor;
@@ -16,7 +19,7 @@ vec4 get_max_height() {
         if (i == int(u_factor)) {
             break;
         }
-        vec4 height = texture2D(u_texture, v_texcoord + norm_direction * float(i) * step_length);
+        vec4 height = texture(u_texture, v_texcoord + norm_direction * float(i) * step_length);
         max_height = max(height, max_height);
     }
     return max_height;
@@ -25,19 +28,19 @@ vec4 get_max_height() {
 void main() {
     vec4 max_height = get_max_height();
     if (u_pass_num == 0.0) {
-        gl_FragColor = vec4(max_height[0], 0.0, 0.0, 0.0);
+        fragColor = vec4(max_height[0], 0.0, 0.0, 0.0);
         return;
     } else if (u_pass_num == 1.0) {
-        vec4 prev = texture2D(u_texture, v_texcoord);
-        gl_FragColor = vec4(prev.x, max_height.x, 0.0, 0.0);
+        vec4 prev = texture(u_texture, v_texcoord);
+        fragColor = vec4(prev.x, max_height.x, 0.0, 0.0);
         return;
     } else if (u_pass_num == 2.0) {
-        vec4 prev = texture2D(u_texture, v_texcoord);
-        gl_FragColor = vec4(prev.x, prev.y, max_height.y, 0.0);
+        vec4 prev = texture(u_texture, v_texcoord);
+        fragColor = vec4(prev.x, prev.y, max_height.y, 0.0);
         return;
     } else if (u_pass_num == 3.0) {
-        vec4 prev = texture2D(u_texture, v_texcoord);
-        gl_FragColor = vec4(prev.x, prev.y, prev.z, max_height.z);
+        vec4 prev = texture(u_texture, v_texcoord);
+        fragColor = vec4(prev.x, prev.y, prev.z, max_height.z);
         return;
     }
 }

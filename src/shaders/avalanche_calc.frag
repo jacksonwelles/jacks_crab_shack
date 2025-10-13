@@ -1,10 +1,13 @@
+#version 300 es
+
 precision mediump float;
 
-varying vec2 v_texcoord;
+in vec2 v_texcoord;
+out vec4 fragColor;
 
 uniform float u_max_height;
 uniform sampler2D u_sand;
-uniform sampler2D u_direction;
+uniform sampler2D u_random;
 uniform vec2 u_texel_size;
 
 vec2 get_direction(in int idx) {
@@ -41,19 +44,18 @@ bool get_accept(in bool accept[8], in int idx) {
     if (idx == 7) { return accept[7]; }
 }
 
-
 float movement_direction() {
-    int sand = int(floor(texture2D(u_sand, v_texcoord).r * u_max_height + 0.5));
-    float rand = floor(texture2D(u_direction, v_texcoord).r * 8.0 + 0.5);
+    float sand = texture(u_sand, v_texcoord).r;
+    float rand = round(texture(u_random, v_texcoord).x * 8.0);
 
     bool can_accept_sand[8];
     int acceptors = 0;
     for (int i = 0; i < 8; i++) {
-        int neighbor = int(floor(texture2D(
+        float neighbor = texture(
             u_sand,
             v_texcoord + get_direction(i) * u_texel_size
-        ).r * u_max_height + 0.5));
-        if (sand - neighbor > 2) {
+        ).r;
+        if (sand - neighbor > 2.0 / u_max_height) {
             update_accept(can_accept_sand, i, true);
             acceptors++;
         } else {
@@ -73,5 +75,5 @@ float movement_direction() {
 }
 
 void main() {
-    gl_FragColor = vec4(movement_direction(), 0.0, 0.0, 0.0);
+    fragColor = vec4(movement_direction(), 0.0, 0.0, 0.0);
 }
