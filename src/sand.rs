@@ -12,8 +12,9 @@ use leptos::html::Canvas;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::prelude::*;
 
+use leptos_use::UseEventListenerOptions;
 use leptos_use::signal_throttled;
-use leptos_use::use_event_listener;
+use leptos_use::use_event_listener_with_options;
 
 use web_sys::HtmlElement;
 use web_sys::WebGl2RenderingContext;
@@ -38,82 +39,6 @@ render_pipeline!(WindPipeline, "shaders/wind.frag");
 
 render_pipeline!(DrawPipeline, "shaders/draw.frag");
 
-#[component]
-pub fn App() -> impl IntoView {
-    let canvas_ref = NodeRef::<Canvas>::new();
-    let (mouse, set_mouse) = signal((false, 0i32, 0i32));
-    let _ = use_event_listener(canvas_ref, leptos::ev::mousedown, move |evt| {
-        *set_mouse.write() = (true, evt.offset_x(), evt.offset_y());
-    });
-    let _ = use_event_listener(canvas_ref, leptos::ev::mouseup, move |_| {
-        set_mouse.update(|tup| tup.0 = false);
-    });
-    let _ = use_event_listener(canvas_ref, leptos::ev::mousemove, move |evt| {
-        set_mouse.update(|tup| {
-            tup.1 = evt.offset_x();
-            tup.2 = evt.offset_y();
-        });
-    });
-    let _ = use_event_listener(canvas_ref, leptos::ev::touchstart, move |evt| {
-        if evt.touches().length() != 1 {
-            set_mouse.update(|tup| tup.0 = false);
-            return;
-        }
-        let touch = evt.touches().item(0).unwrap();
-        let element = touch
-            .target()
-            .unwrap()
-            .dyn_ref::<HtmlElement>()
-            .unwrap()
-            .clone();
-        let rect = element.get_bounding_client_rect();
-        *set_mouse.write() = (
-            true,
-            touch.client_x() - rect.x() as i32,
-            touch.client_y() - rect.y() as i32,
-        );
-    });
-    let _ = use_event_listener(canvas_ref, leptos::ev::touchend, move |_| {
-        set_mouse.update(|tup| tup.0 = false)
-    });
-    let _ = use_event_listener(canvas_ref, leptos::ev::touchmove, move |evt| {
-        let touch = evt.touches().item(0).unwrap();
-        let element = touch
-            .target()
-            .unwrap()
-            .dyn_ref::<HtmlElement>()
-            .unwrap()
-            .clone();
-        let rect = element.get_bounding_client_rect();
-        set_mouse.update(|tup| {
-            tup.1 = touch.client_x() - rect.x() as i32;
-            tup.2 = touch.client_y() - rect.y() as i32;
-        });
-    });
-    let (sun_move, set_sun_move) = signal(true);
-    Effect::new(move |_| {
-        if let Some(canvas) = canvas_ref.get() {
-            canvas.set_width(1024);
-            canvas.set_height(1024);
-            let context = canvas
-                .get_context("webgl2")
-                .expect("get_context")
-                .expect("object")
-                .dyn_into::<WebGl2RenderingContext>()
-                .unwrap();
-            canvas_fill(context.clone(), sun_move.into(), mouse.into());
-        }
-    });
-
-    view! {
-     <canvas style:touch-action="pinch-zoom" node_ref=canvas_ref />
-     <br/>
-     <button
-        on:click=move |_| *set_sun_move.write() = ! sun_move.get()
-    >
-        {move || {if sun_move.get() {"STOP"} else {"START"}}}
-    </button> }
-}
 
 struct RandomStage {
     context: WebGl2RenderingContext,
@@ -124,10 +49,8 @@ struct RandomStage {
 
 impl RandomStage {
     pub fn update(&mut self) -> () {
-        self.pipeline.set_arguments(
-            &self.context,
-            window().performance().unwrap().now() as f32
-        );
+        self.pipeline
+            .set_arguments(&self.context, window().performance().unwrap().now() as f32);
         self.quad.blit(Some(&self.rand));
     }
 }
@@ -318,9 +241,126 @@ impl DrawStage {
     }
 }
 
+#[component]
+pub fn App() -> impl IntoView {
+    let canvas_ref = NodeRef::<Canvas>::new();
+    let (mouse, set_mouse) = signal((false, 0i32, 0i32));
+    let evt_options = UseEventListenerOptions::default().passive(true);
+    let _ = use_event_listener_with_options(
+        canvas_ref,
+        leptos::ev::mousedown,
+        move |evt| {
+            *set_mouse.write() = (true, evt.offset_x(), evt.offset_y());
+        },
+        evt_options,
+    );
+    let _ = use_event_listener_with_options(
+        window(),
+        leptos::ev::mouseup,
+        move |_| {
+            set_mouse.update(|tup| tup.0 = false);
+        },
+        evt_options,
+    );
+    let _ = use_event_listener_with_options(
+        canvas_ref,
+        leptos::ev::mousemove,
+        move |evt| {
+            set_mouse.update(|tup| {
+                tup.1 = evt.offset_x();
+                tup.2 = evt.offset_y();
+            });
+        },
+        evt_options,
+    );
+    let _ = use_event_listener_with_options(
+        canvas_ref,
+        leptos::ev::touchstart,
+        move |evt| {
+            if evt.touches().length() != 1 {
+                set_mouse.update(|tup| tup.0 = false);
+                return;
+            }
+            let touch = evt.touches().item(0).unwrap();
+            let element = touch
+                .target()
+                .unwrap()
+                .dyn_ref::<HtmlElement>()
+                .unwrap()
+                .clone();
+            let rect = element.get_bounding_client_rect();
+            *set_mouse.write() = (
+                true,
+                touch.client_x() - rect.x() as i32,
+                touch.client_y() - rect.y() as i32,
+            );
+        },
+        evt_options,
+    );
+    let _ = use_event_listener_with_options(
+        canvas_ref,
+        leptos::ev::touchend,
+        move |_| set_mouse.update(|tup| tup.0 = false),
+        evt_options,
+    );
+    let _ = use_event_listener_with_options(
+        canvas_ref,
+        leptos::ev::touchmove,
+        move |evt| {
+            let touch = evt.touches().item(0).unwrap();
+            let element = touch
+                .target()
+                .unwrap()
+                .dyn_ref::<HtmlElement>()
+                .unwrap()
+                .clone();
+            let rect = element.get_bounding_client_rect();
+            set_mouse.update(|tup| {
+                tup.1 = touch.client_x() - rect.x() as i32;
+                tup.2 = touch.client_y() - rect.y() as i32;
+            });
+        },
+        evt_options,
+    );
+    let (fps, set_fps) = signal(0.0);
+    let (sun_move, set_sun_move) = signal(true);
+    Effect::new(move |_| {
+        if let Some(canvas) = canvas_ref.get() {
+            canvas.set_width(1024);
+            canvas.set_height(1024);
+            let context = canvas
+                .get_context("webgl2")
+                .expect("get_context")
+                .expect("object")
+                .dyn_into::<WebGl2RenderingContext>()
+                .unwrap();
+            canvas_fill(
+                context.clone(),
+                sun_move.into(),
+                set_fps.into(),
+                mouse.into(),
+            );
+        }
+    });
+
+    let fps_throttled: Signal<f64> = signal_throttled(fps, 500.0);
+    view! {
+     <canvas style:touch-action="pinch-zoom" node_ref=canvas_ref />
+     <br/>
+     <button
+        on:click=move |_| *set_sun_move.write() = ! sun_move.get()
+    >
+        {move || {if sun_move.get() {"STOP"} else {"START"}}}
+    </button> <br/>
+    <pre> {move||{
+        format!("{:.2}",fps_throttled.get())
+    }}</pre>}
+}
+
 fn canvas_fill(
     context: WebGl2RenderingContext,
     sun_move: Signal<bool>,
+    set_fps: WriteSignal<f64>,
     mouse: Signal<(bool, i32, i32)>,
 ) {
     context.get_extension("EXT_color_buffer_float").unwrap();
@@ -331,69 +371,10 @@ fn canvas_fill(
         include_str!("shaders/quad.vert"),
     )
     .unwrap();
-
-    let quad_frag_shader = compile_shader(
-        &context,
-        GL::FRAGMENT_SHADER,
-        include_str!("shaders/quad.frag"),
-    )
-    .unwrap();
-
-    let avalanche_calc_frag_shader = compile_shader(
-        &context,
-        GL::FRAGMENT_SHADER,
-        include_str!("shaders/avalanche_calc.frag"),
-    )
-    .unwrap();
-
-    let avalanche_apply_frag_shader = compile_shader(
-        &context,
-        GL::FRAGMENT_SHADER,
-        include_str!("shaders/avalanche_apply.frag"),
-    )
-    .unwrap();
-
-    let shadow_frag_shader = compile_shader(
-        &context,
-        GL::FRAGMENT_SHADER,
-        include_str!("shaders/optimized_shadow.frag"),
-    )
-    .unwrap();
-
-    let drop_frag_shader = compile_shader(
-        &context,
-        GL::FRAGMENT_SHADER,
-        include_str!("shaders/drop_sand.frag"),
-    )
-    .unwrap();
-
-    let lookahead_frag_shader = compile_shader(
-        &context,
-        GL::FRAGMENT_SHADER,
-        include_str!("shaders/precompute_shadow.frag"),
-    )
-    .unwrap();
-
-    let shift_frag_shader = compile_shader(
-        &context,
-        GL::FRAGMENT_SHADER,
-        include_str!("shaders/random.frag"),
-    )
-    .unwrap();
-
-    let wind_frag_shader = compile_shader(
-        &context,
-        GL::FRAGMENT_SHADER,
-        include_str!("shaders/wind.frag"),
-    )
-    .unwrap();
-
-    let draw_frag_shader = compile_shader(
-        &context,
-        GL::FRAGMENT_SHADER,
-        include_str!("shaders/draw.frag"),
-    )
-    .unwrap();
+    let make_prog = |frag_source: &str| {
+        let compiled = compile_shader(&context, GL::FRAGMENT_SHADER, frag_source).unwrap();
+        Program::create(&context, &quad_vert_shader, &compiled)
+    };
 
     let window_w = context.drawing_buffer_width() as usize;
     let window_h = context.drawing_buffer_height() as usize;
@@ -407,27 +388,32 @@ fn canvas_fill(
     let drop_period = 16.0;
     let wind_speed = 0.001;
     let pickup_rate = 0.1;
+    let frame_period = 8.333;
 
-    let avalanche_calc_program =
-        Program::create(&context, &quad_vert_shader, &avalanche_calc_frag_shader);
-    let avalanche_apply_program =
-        Program::create(&context, &quad_vert_shader, &avalanche_apply_frag_shader);
-    let shadow_program = Program::create(&context, &quad_vert_shader, &shadow_frag_shader);
-    let drop_program = Program::create(&context, &quad_vert_shader, &drop_frag_shader);
-    let lookahead_program = Program::create(&context, &quad_vert_shader, &lookahead_frag_shader);
-    let shift_program = Program::create(&context, &quad_vert_shader, &shift_frag_shader);
-    let draw_program = Program::create(&context, &quad_vert_shader, &draw_frag_shader);
-    let wind_program = Program::create(&context, &quad_vert_shader, &wind_frag_shader);
-
-    let avalanche_calc_pipeline = AvalancheCalcPipeline::create(&context, avalanche_calc_program);
-    let avalanche_apply_pipeline =
-        AvalancheApplyPipeline::create(&context, avalanche_apply_program);
-    let shadow_pipeline = ShadowPipeline::create(&context, shadow_program);
-    let drop_pipeline = DropPipeline::create(&context, drop_program);
-    let lookahead_pipeline = LookaheadPipeline::create(&context, lookahead_program);
-    let random_pipeline = RandomPipeline::create(&context, shift_program);
-    let draw_pipeline = DrawPipeline::create(&context, draw_program);
-    let wind_pipeline = WindPipeline::create(&context, wind_program);
+    let avalanche_calc_pipeline = AvalancheCalcPipeline::create(
+        &context,
+        make_prog(include_str!("shaders/avalanche_calc.frag")),
+    );
+    let avalanche_apply_pipeline = AvalancheApplyPipeline::create(
+        &context,
+        make_prog(include_str!("shaders/avalanche_apply.frag")),
+    );
+    let shadow_pipeline = ShadowPipeline::create(
+        &context,
+        make_prog(include_str!("shaders/optimized_shadow.frag")),
+    );
+    let drop_pipeline =
+        DropPipeline::create(&context, make_prog(include_str!("shaders/drop_sand.frag")));
+    let lookahead_pipeline = LookaheadPipeline::create(
+        &context,
+        make_prog(include_str!("shaders/precompute_shadow.frag")),
+    );
+    let random_pipeline =
+        RandomPipeline::create(&context, make_prog(include_str!("shaders/random.frag")));
+    let draw_pipeline =
+        DrawPipeline::create(&context, make_prog(include_str!("shaders/draw.frag")));
+    let wind_pipeline =
+        WindPipeline::create(&context, make_prog(include_str!("shaders/wind.frag")));
 
     let shadow = Rc::new(make_shadow(&context, window_w, window_w));
     let random = Rc::new(make_rand(&context, sand_w, sand_h));
@@ -438,6 +424,7 @@ fn canvas_fill(
     )));
 
     let (next_frame, set_next_frame) = signal(());
+    let next_frame_throttled: Signal<()> = signal_throttled(next_frame, frame_period);
 
     request_animation_frame(move || {
         *set_next_frame.write();
@@ -531,7 +518,7 @@ fn canvas_fill(
         sun_angle,
     };
 
-    let mut wind_stage = WindStage{
+    let mut wind_stage = WindStage {
         context: context.clone(),
         quad: quad.clone(),
         shadow: shadow.clone(),
@@ -540,7 +527,7 @@ fn canvas_fill(
         random: random.clone(),
         max_height,
         pickup_rate,
-        wind_speed
+        wind_speed,
     };
 
     Effect::new(move || {
@@ -552,10 +539,13 @@ fn canvas_fill(
         drop_stage.update(x as f32, y as f32);
     });
 
+    let mut prev_frame = 0.0;
     Effect::new(move || {
-        next_frame.get();
+        next_frame_throttled.get();
         let direction = (angle.get().cos() as f32, angle.get().sin() as f32);
-
+        let now = window().performance().unwrap().now();
+        *set_fps.write() = 1000.0 / (now - prev_frame);
+        prev_frame = now;
         avalanche_stage.update();
         lookahead_stage.update(direction);
         shadow_stage.update(direction);
@@ -570,12 +560,12 @@ fn make_shadow(context: &WebGl2RenderingContext, width: usize, height: usize) ->
         context,
         GL::TEXTURE_2D,
         0,
-        GL::R32F,
+        GL::R16F,
         width as i32,
         height as i32,
         0,
         GL::RED,
-        GL::FLOAT,
+        GL::HALF_FLOAT,
         None::<Infallible>,
         &[
             (GL::TEXTURE_MIN_FILTER, GL::NEAREST),
@@ -606,18 +596,7 @@ fn make_sand(context: &WebGl2RenderingContext, width: usize, height: usize) -> S
     );
 }
 
-struct ShiftState {
-    x: u8,
-    y: u8,
-    z: u8,
-    a: u8,
-}
-
-fn make_rand(
-    context: &WebGl2RenderingContext,
-    width: usize,
-    height: usize,
-) -> BufferedTexture {
+fn make_rand(context: &WebGl2RenderingContext, width: usize, height: usize) -> BufferedTexture {
     return BufferedTexture::create(
         context,
         GL::TEXTURE_2D,

@@ -55,7 +55,7 @@ float movement_direction() {
             u_sand,
             v_texcoord + get_direction(i) * u_texel_size
         ).r;
-        if (sand - neighbor > 2.0 / u_max_height) {
+        if ((sand - neighbor) * u_max_height > 2.0) {
             update_accept(can_accept_sand, i, true);
             acceptors++;
         } else {

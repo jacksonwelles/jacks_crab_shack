@@ -1,6 +1,7 @@
 #version 300 es
 
-precision mediump float;
+precision highp float;
+precision highp int;
 
 in vec2 v_texcoord;
 out vec4 frag_color;
