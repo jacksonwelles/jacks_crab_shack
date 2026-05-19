@@ -323,7 +323,8 @@ pub fn App() -> impl IntoView {
         evt_options,
     );
     let (fps, set_fps) = signal(0.0);
-    let (sun_move, set_sun_move) = signal(true);
+    let (sun_move, set_sun_move) = signal(false);
+    let (wind_on, set_wind_on) = signal(true);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
             canvas.set_width(1024);
@@ -337,6 +338,7 @@ pub fn App() -> impl IntoView {
             canvas_fill(
                 context.clone(),
                 sun_move.into(),
+                wind_on.into(),
                 set_fps.into(),
                 mouse.into(),
             );
@@ -348,9 +350,15 @@ pub fn App() -> impl IntoView {
      <canvas style:touch-action="pinch-zoom" node_ref=canvas_ref />
      <br/>
      <button
+        on:click=move |_| *set_wind_on.write() = ! wind_on.get()
+    >
+        {move || {if wind_on.get() {"WIND STOP"} else {"WIND START"}}}
+    </button> <br/>
+    <br/>
+     <button
         on:click=move |_| *set_sun_move.write() = ! sun_move.get()
     >
-        {move || {if sun_move.get() {"STOP"} else {"START"}}}
+        {move || {if sun_move.get() {"SUN STOP"} else {"SUN START"}}}
     </button> <br/>
     <pre> {move||{
         format!("{:.2}",fps_throttled.get())
@@ -360,6 +368,7 @@ pub fn App() -> impl IntoView {
 fn canvas_fill(
     context: WebGl2RenderingContext,
     sun_move: Signal<bool>,
+    wind_on: Signal<bool>,
     set_fps: WriteSignal<f64>,
     mouse: Signal<(bool, i32, i32)>,
 ) {
@@ -386,8 +395,8 @@ fn canvas_fill(
     let sun_angle = 38.0f32;
     let radius = 200.0;
     let drop_period = 16.0;
-    let wind_speed = 0.001;
-    let pickup_rate = 0.1;
+    let wind_speed = 0.0005;
+    let pickup_rate = 0.5;
     let frame_period = 8.333;
 
     let avalanche_calc_pipeline = AvalancheCalcPipeline::create(
@@ -550,7 +559,9 @@ fn canvas_fill(
         lookahead_stage.update(direction);
         shadow_stage.update(direction);
         draw_stage.update(direction);
-        wind_stage.update(direction);
+        if wind_on.get_untracked() {
+            wind_stage.update(direction);
+        }
         random_stage.update();
     });
 }
