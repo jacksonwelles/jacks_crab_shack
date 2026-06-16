@@ -393,7 +393,7 @@ fn canvas_fill(
     let scale = 4.0f32;
     let max_height = 255.0f32;
     let sun_angle = 38.0f32;
-    let radius = 200.0;
+    let radius = 20.0;
     let drop_period = 16.0;
     let wind_speed = 0.0005;
     let pickup_rate = 0.5;
