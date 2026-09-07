@@ -10,10 +10,10 @@ uniform sampler2D u_shadow;
 uniform vec3 u_voxel_size;
 uniform vec3 u_direction;
 
-const vec3 GROUND = vec3(0.659, 0.6, 0.475);
-const vec3 SAND = vec3(0.878, 0.718, 0.365);
+const vec3 GROUND = vec3(0.759, 0.6, 0.475);
+const vec3 SAND = vec3(0.878, 0.668, 0.365);
 const vec3 SUN = vec3(1.0, 1.0, 1.0);
-const vec3 SKY = SUN;//vec3(0.25, 0.54, 1.0);
+const vec3 SKY = SUN; // vec3(0.7, 0.9, 1.0);
 
 vec3 get_normal() {
     float up    = texture(u_sand, v_texcoord + vec2( 0.0,  1.0 ) * u_voxel_size.xy ).r / u_voxel_size.z;
@@ -21,8 +21,8 @@ vec3 get_normal() {
     float left  = texture(u_sand, v_texcoord + vec2(-1.0,  0.0 ) * u_voxel_size.xy ).r / u_voxel_size.z;
     float right = texture(u_sand, v_texcoord + vec2( 1.0,  0.0 ) * u_voxel_size.xy ).r / u_voxel_size.z;
 
-    vec3 a = vec3(2.0, 0.0, right - left);
-    vec3 b = vec3(0.0, 2.0, up - down);
+    vec3 a = vec3(1.0, 0.0, right - left);
+    vec3 b = vec3(0.0, 1.0, up - down);
 
     return normalize(cross(a, b));
 }
@@ -38,6 +38,6 @@ void main() {
     if (ground_sand == 0.0) {
         base = GROUND;
     }
-    base = base * (SKY * 0.5 + SUN * 0.8 * diffuse * (1.0 - (shadow - shadow)));
+    base = base * (SKY * 0.5 + SUN * 0.8 * diffuse * (1.0 -  shadow));
     fragColor = vec4(base.xyz, 1.0); //mix(base, SAND, windborn_sand * 64.0);
 }

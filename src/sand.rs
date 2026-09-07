@@ -1,7 +1,6 @@
-use std::cell::Cell;
 use std::cell::RefCell;
+use std::cmp::min;
 use std::convert::Infallible;
-use std::f64::consts::PI;
 use std::rc::Rc;
 
 use utility::prelude::*;
@@ -12,13 +11,14 @@ use leptos::html::Canvas;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::prelude::*;
 
+use leptos::logging::log;
+
 use leptos_use::UseEventListenerOptions;
 use leptos_use::signal_throttled;
 use leptos_use::use_event_listener_with_options;
 
 use web_sys::HtmlElement;
 use web_sys::WebGl2RenderingContext;
-use web_sys::console;
 
 type GL = WebGl2RenderingContext;
 
@@ -122,13 +122,13 @@ struct LookaheadStage {
     sand: Rc<RefCell<SwappableTexture>>,
     quad: Rc<Quad>,
     lookahead: Rc<RefCell<SwappableTexture>>,
-    pipeline: LookaheadPipeline,
+    pipeline: Rc<RefCell<LookaheadPipeline>>,
     scale: f32,
 }
 
 impl LookaheadStage {
     pub fn update(&mut self, direction: (f32, f32)) -> () {
-        self.pipeline.set_arguments(
+        self.pipeline.borrow_mut().set_arguments(
             &self.context,
             &self.sand.borrow().read(),
             self.scale,
@@ -140,7 +140,7 @@ impl LookaheadStage {
         self.quad.blit(Some(self.lookahead.borrow().write()));
         self.lookahead.borrow_mut().swap();
         for i in 1..4 {
-            self.pipeline.set_arguments(
+            self.pipeline.borrow_mut().set_arguments(
                 &self.context,
                 self.lookahead.borrow().read(),
                 self.scale,
@@ -160,15 +160,14 @@ struct ShadowStage {
     sand: Rc<RefCell<SwappableTexture>>,
     shadow: Rc<BufferedTexture>,
     lookahead: Rc<RefCell<SwappableTexture>>,
-    pipeline: ShadowPipeline,
+    pipeline: Rc<RefCell<ShadowPipeline>>,
     scale: f32,
     max_height: f32,
-    sun_angle: f32,
 }
 
 impl ShadowStage {
-    pub fn update(&mut self, direction: (f32, f32)) {
-        self.pipeline.set_arguments(
+    pub fn update(&mut self, direction: (f32, f32, f32)) {
+        self.pipeline.borrow_mut().set_arguments(
             &self.context,
             &self.sand.borrow().read(),
             self.lookahead.borrow().read(),
@@ -178,7 +177,7 @@ impl ShadowStage {
                 self.shadow.texel_size().1,
                 1.0 / self.max_height,
             ),
-            (direction.0, direction.1, self.sun_angle.to_radians().tan()),
+            direction,
         );
         self.quad.blit(Some(&self.shadow));
     }
@@ -221,11 +220,10 @@ struct DrawStage {
     shadow: Rc<BufferedTexture>,
     pipeline: DrawPipeline,
     max_height: f32,
-    sun_angle: f32,
 }
 
 impl DrawStage {
-    pub fn update(&mut self, direction: (f32, f32)) {
+    pub fn update(&mut self, direction: (f32, f32, f32)) {
         self.pipeline.set_arguments(
             &self.context,
             &self.sand.borrow().read(),
@@ -235,22 +233,23 @@ impl DrawStage {
                 self.shadow.texel_size().1,
                 1.0 / self.max_height,
             ),
-            (direction.0, direction.1, self.sun_angle.to_radians().tan()),
+            direction,
         );
         self.quad.blit(None);
     }
 }
 
+
 #[component]
 pub fn App() -> impl IntoView {
     let canvas_ref = NodeRef::<Canvas>::new();
-    let (mouse, set_mouse) = signal((false, 0i32, 0i32));
+    let (mouse, set_mouse) = signal((None::<(i32, i32)>, 0i32, 0i32));
     let evt_options = UseEventListenerOptions::default().passive(true);
     let _ = use_event_listener_with_options(
         canvas_ref,
         leptos::ev::mousedown,
         move |evt| {
-            *set_mouse.write() = (true, evt.offset_x(), evt.offset_y());
+            *set_mouse.write() = (Some((evt.offset_x(), evt.offset_y())), evt.offset_x(), evt.offset_y());
         },
         evt_options,
     );
@@ -258,7 +257,7 @@ pub fn App() -> impl IntoView {
         window(),
         leptos::ev::mouseup,
         move |_| {
-            set_mouse.update(|tup| tup.0 = false);
+            set_mouse.update(|tup| tup.0 = None);
         },
         evt_options,
     );
@@ -278,7 +277,7 @@ pub fn App() -> impl IntoView {
         leptos::ev::touchstart,
         move |evt| {
             if evt.touches().length() != 1 {
-                set_mouse.update(|tup| tup.0 = false);
+                set_mouse.update(|tup| tup.0 = None);
                 return;
             }
             let touch = evt.touches().item(0).unwrap();
@@ -289,10 +288,12 @@ pub fn App() -> impl IntoView {
                 .unwrap()
                 .clone();
             let rect = element.get_bounding_client_rect();
+            let canvas_x = touch.client_x() - rect.x() as i32;
+            let canvas_y = touch.client_y() - rect.y() as i32;
             *set_mouse.write() = (
-                true,
-                touch.client_x() - rect.x() as i32,
-                touch.client_y() - rect.y() as i32,
+                Some((canvas_x, canvas_y)),
+                canvas_x,
+                canvas_y as i32,
             );
         },
         evt_options,
@@ -300,7 +301,7 @@ pub fn App() -> impl IntoView {
     let _ = use_event_listener_with_options(
         canvas_ref,
         leptos::ev::touchend,
-        move |_| set_mouse.update(|tup| tup.0 = false),
+        move |_| set_mouse.update(|tup| tup.0 = None),
         evt_options,
     );
     let _ = use_event_listener_with_options(
@@ -322,8 +323,8 @@ pub fn App() -> impl IntoView {
         },
         evt_options,
     );
+    let input_mode = RwSignal::new("sand".to_string());
     let (fps, set_fps) = signal(0.0);
-    let (sun_move, set_sun_move) = signal(false);
     let (wind_on, set_wind_on) = signal(true);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
@@ -337,40 +338,44 @@ pub fn App() -> impl IntoView {
                 .unwrap();
             canvas_fill(
                 context.clone(),
-                sun_move.into(),
                 wind_on.into(),
                 set_fps.into(),
                 mouse.into(),
+                input_mode.into(),
             );
         }
     });
 
     let fps_throttled: Signal<f64> = signal_throttled(fps, 500.0);
     view! {
-     <canvas style:touch-action="pinch-zoom" node_ref=canvas_ref />
-     <br/>
-     <button
-        on:click=move |_| *set_wind_on.write() = ! wind_on.get()
-    >
-        {move || {if wind_on.get() {"WIND STOP"} else {"WIND START"}}}
-    </button> <br/>
-    <br/>
-     <button
-        on:click=move |_| *set_sun_move.write() = ! sun_move.get()
-    >
-        {move || {if sun_move.get() {"SUN STOP"} else {"SUN START"}}}
-    </button> <br/>
-    <pre> {move||{
-        format!("{:.2}",fps_throttled.get())
-    }}</pre>}
+        <canvas style:touch-action="pinch-zoom" node_ref=canvas_ref />
+        <br />
+        <pre>{move || { format!("{:.2}", fps_throttled.get()) }}</pre>
+        <button on:click=move |_| {
+            *set_wind_on.write() = !wind_on.get();
+        }>{move || { if wind_on.get() { "WIND STOP" } else { "WIND START" } }}</button>
+        <br />
+        <br />
+        <fieldset>
+            <label>
+                "Sand" <input type="radio" name="color" value="sand" bind:group=input_mode />
+            </label>
+            <label>
+                "Wind" <input type="radio" name="color" value="wind" bind:group=input_mode />
+            </label>
+            <label>
+                "Sun" <input type="radio" name="color" value="shadow" bind:group=input_mode />
+            </label>
+        </fieldset>
+    }
 }
 
 fn canvas_fill(
     context: WebGl2RenderingContext,
-    sun_move: Signal<bool>,
     wind_on: Signal<bool>,
     set_fps: WriteSignal<f64>,
-    mouse: Signal<(bool, i32, i32)>,
+    mouse: Signal<(Option<(i32, i32)>, i32, i32)>,
+    input_mode : Signal<String>,
 ) {
     context.get_extension("EXT_color_buffer_float").unwrap();
     context.get_extension("OES_texture_float_linear").unwrap();
@@ -392,8 +397,7 @@ fn canvas_fill(
     let sand_h = window_h;
     let scale = 4.0f32;
     let max_height = 255.0f32;
-    let sun_angle = 38.0f32;
-    let radius = 20.0;
+    let radius = 100.0;
     let drop_period = 16.0;
     let wind_speed = 0.0005;
     let pickup_rate = 0.5;
@@ -407,16 +411,16 @@ fn canvas_fill(
         &context,
         make_prog(include_str!("shaders/avalanche_apply.frag")),
     );
-    let shadow_pipeline = ShadowPipeline::create(
+    let shadow_pipeline = Rc::new(RefCell::new(ShadowPipeline::create(
         &context,
         make_prog(include_str!("shaders/optimized_shadow.frag")),
-    );
+    )));
     let drop_pipeline =
         DropPipeline::create(&context, make_prog(include_str!("shaders/drop_sand.frag")));
-    let lookahead_pipeline = LookaheadPipeline::create(
+    let lookahead_pipeline = Rc::new(RefCell::new(LookaheadPipeline::create(
         &context,
         make_prog(include_str!("shaders/precompute_shadow.frag")),
-    );
+    )));
     let random_pipeline =
         RandomPipeline::create(&context, make_prog(include_str!("shaders/random.frag")));
     let draw_pipeline =
@@ -424,13 +428,19 @@ fn canvas_fill(
     let wind_pipeline =
         WindPipeline::create(&context, make_prog(include_str!("shaders/wind.frag")));
 
-    let shadow = Rc::new(make_shadow(&context, window_w, window_w));
+    let shadow = Rc::new(make_shadow(&context, sand_w, sand_h));
     let random = Rc::new(make_rand(&context, sand_w, sand_h));
     let delta_sand = make_sand(&context, sand_w, sand_h);
     let sand = Rc::new(RefCell::new(make_sand(&context, sand_w, sand_h)));
     let lookahead = Rc::new(RefCell::new(make_shadow_lookahead(
         &context, window_w, window_h,
     )));
+
+    // let wind_shadow = Rc::new(make_shadow(&context, sand_w / 2, sand_h / 2));
+    // let wind_shadow_lookahead = Rc::new(RefCell::new(make_shadow_lookahead(&context, sand_w / 2, sand_h / 2)));
+
+    let wind_shadow = Rc::new(make_shadow(&context, sand_w, sand_h));
+    let wind_shadow_lookahead = Rc::new(RefCell::new(make_shadow_lookahead(&context, sand_w, sand_h)));
 
     let (next_frame, set_next_frame) = signal(());
     let next_frame_throttled: Signal<()> = signal_throttled(next_frame, frame_period);
@@ -441,24 +451,13 @@ fn canvas_fill(
 
     let (signal_drop, set_signal_drop) = signal(());
     let signal_drop_throttled: Signal<()> = signal_throttled(signal_drop, drop_period);
-    let angle = Rc::new(Cell::new(0.0));
-
-    let mut prev_time = None::<f64>;
 
     {
-        let angle = angle.clone();
         Effect::new(move || {
             next_frame.get();
-            let now = window().performance().unwrap().now();
-            if sun_move.get_untracked() {
-                if prev_time.is_some() {
-                    angle.update(|x| x + (now - prev_time.unwrap()) % 20000.0 * (PI / 10000.0));
-                }
-            }
-            if mouse.get_untracked().0 {
+            if mouse.get_untracked().0.is_some() {
                 set_signal_drop.write();
             }
-            prev_time = Some(now);
             request_animation_frame(move || {
                 *set_next_frame.write();
             });
@@ -496,6 +495,26 @@ fn canvas_fill(
         max_height,
     };
 
+    let mut wind_lookahead_stage = LookaheadStage {
+        context: context.clone(),
+        sand: sand.clone(),
+        quad: quad.clone(),
+        lookahead: wind_shadow_lookahead.clone(),
+        pipeline: lookahead_pipeline.clone(),
+        scale,
+    };
+
+    let mut wind_shadow_stage = ShadowStage {
+        context: context.clone(),
+        quad: quad.clone(),
+        sand: sand.clone(),
+        shadow: wind_shadow.clone(),
+        lookahead: wind_shadow_lookahead.clone(),
+        pipeline: shadow_pipeline.clone(),
+        scale,
+        max_height: max_height,
+    };
+
     let mut lookahead_stage = LookaheadStage {
         context: context.clone(),
         sand: sand.clone(),
@@ -514,7 +533,6 @@ fn canvas_fill(
         pipeline: shadow_pipeline,
         scale,
         max_height,
-        sun_angle,
     };
 
     let mut draw_stage = DrawStage {
@@ -524,13 +542,12 @@ fn canvas_fill(
         sand: sand.clone(),
         pipeline: draw_pipeline,
         max_height,
-        sun_angle,
     };
 
     let mut wind_stage = WindStage {
         context: context.clone(),
         quad: quad.clone(),
-        shadow: shadow.clone(),
+        shadow: wind_shadow.clone(),
         sand: sand.clone(),
         pipeline: wind_pipeline,
         random: random.clone(),
@@ -539,29 +556,43 @@ fn canvas_fill(
         wind_speed,
     };
 
-    Effect::new(move || {
-        signal_drop_throttled.get();
-        let (active, x, y) = mouse.get_untracked();
-        if !active {
-            return;
-        }
-        drop_stage.update(x as f32, y as f32);
-    });
-
+    let mut wind_dir = (0.0, 0.0, 0.0);
+    let mut sun_dir = (20.0, 60.0, 500.0);
     let mut prev_frame = 0.0;
     Effect::new(move || {
         next_frame_throttled.get();
-        let direction = (angle.get().cos() as f32, angle.get().sin() as f32);
+        let (click_start, mouse_x, mouse_y) = mouse.get_untracked();
+        if let Some((start_x, start_y)) = click_start {
+            let dir = ((mouse_x - start_x) as f32 , (mouse_y - start_y) as f32);
+            match input_mode.get_untracked().as_str() {
+                "shadow" => {
+                    sun_dir = (dir.0, dir.1, min(window_h, window_w) as f32 / 4.0);
+                    // log!("sun direction {:?}", sun_dir)
+                },
+
+                "wind" => {
+                    let mag = (dir.0.powi(2) + dir.1.powi(2)).sqrt();
+                    wind_dir = (dir.0 / mag, dir.1 / mag, 38.0f32.to_radians().tan());
+                },
+
+                "sand" => {
+                    drop_stage.update(mouse_x as f32, mouse_y as f32);
+                }
+                _ => ()
+            };
+        }
         let now = window().performance().unwrap().now();
         *set_fps.write() = 1000.0 / (now - prev_frame);
         prev_frame = now;
         avalanche_stage.update();
-        lookahead_stage.update(direction);
-        shadow_stage.update(direction);
-        draw_stage.update(direction);
-        if wind_on.get_untracked() {
-            wind_stage.update(direction);
-        }
+        lookahead_stage.update((sun_dir.0, sun_dir.1));
+        shadow_stage.update(sun_dir);
+        wind_lookahead_stage.update((wind_dir.0, wind_dir.1));
+        wind_shadow_stage.update(wind_dir);
+        draw_stage.update(sun_dir);
+        // if wind_on.get_untracked() {
+        //     wind_stage.update((wind_dir.0, wind_dir.1));
+        // }
         random_stage.update();
     });
 }

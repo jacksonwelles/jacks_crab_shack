@@ -57,9 +57,10 @@ void main() {
         }
     }
     if (shadowed < 0.5) {
+        float sand_picked_up = 0.5f / u_max_height;
         if (rand < u_pickup_rate) {
-            new_sand = min (1.0, new_sand + min(base_sand, 1.0 / u_max_height));
-            base_sand = max(0.0, base_sand - 1.0/u_max_height);
+            new_sand = min (1.0, new_sand + min(base_sand, sand_picked_up));
+            base_sand = max(0.0, base_sand - sand_picked_up);
         }
     }
     fragColor = vec4(base_sand, new_sand, 0.0, 0.0);
