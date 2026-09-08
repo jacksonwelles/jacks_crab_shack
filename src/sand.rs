@@ -39,6 +39,7 @@ render_pipeline!(WindPipeline, "shaders/wind.frag");
 
 render_pipeline!(DrawPipeline, "shaders/draw.frag");
 
+render_pipeline!(NewAvalanchePipeline, "shaders/avalanche_v3.frag");
 
 struct RandomStage {
     context: WebGl2RenderingContext,
@@ -85,6 +86,27 @@ impl AvalancheStage {
             self.sand.borrow().read().texel_size(),
         );
 
+        self.quad.blit(Some(self.sand.borrow().write()));
+        self.sand.borrow_mut().swap();
+    }
+}
+
+struct NewAvalancheStage {
+    context: WebGl2RenderingContext,
+    sand: Rc<RefCell<SwappableTexture>>,
+    quad: Rc<Quad>,
+    calc: NewAvalanchePipeline,
+    max_height: f32,
+}
+
+impl NewAvalancheStage {
+    pub fn update(&mut self) -> () {
+        self.calc.set_arguments(
+            &self.context,
+            self.max_height,
+            self.sand.borrow().read(),
+            self.sand.borrow().read().texel_size(),
+        );
         self.quad.blit(Some(self.sand.borrow().write()));
         self.sand.borrow_mut().swap();
     }
@@ -239,7 +261,6 @@ impl DrawStage {
     }
 }
 
-
 #[component]
 pub fn App() -> impl IntoView {
     let canvas_ref = NodeRef::<Canvas>::new();
@@ -249,7 +270,11 @@ pub fn App() -> impl IntoView {
         canvas_ref,
         leptos::ev::mousedown,
         move |evt| {
-            *set_mouse.write() = (Some((evt.offset_x(), evt.offset_y())), evt.offset_x(), evt.offset_y());
+            *set_mouse.write() = (
+                Some((evt.offset_x(), evt.offset_y())),
+                evt.offset_x(),
+                evt.offset_y(),
+            );
         },
         evt_options,
     );
@@ -290,11 +315,7 @@ pub fn App() -> impl IntoView {
             let rect = element.get_bounding_client_rect();
             let canvas_x = touch.client_x() - rect.x() as i32;
             let canvas_y = touch.client_y() - rect.y() as i32;
-            *set_mouse.write() = (
-                Some((canvas_x, canvas_y)),
-                canvas_x,
-                canvas_y as i32,
-            );
+            *set_mouse.write() = (Some((canvas_x, canvas_y)), canvas_x, canvas_y as i32);
         },
         evt_options,
     );
@@ -375,7 +396,7 @@ fn canvas_fill(
     wind_on: Signal<bool>,
     set_fps: WriteSignal<f64>,
     mouse: Signal<(Option<(i32, i32)>, i32, i32)>,
-    input_mode : Signal<String>,
+    input_mode: Signal<String>,
 ) {
     context.get_extension("EXT_color_buffer_float").unwrap();
     context.get_extension("OES_texture_float_linear").unwrap();
@@ -398,7 +419,6 @@ fn canvas_fill(
     let scale = 4.0f32;
     let max_height = 255.0f32;
     let radius = 100.0;
-    let drop_period = 16.0;
     let wind_speed = 0.0005;
     let pickup_rate = 0.5;
     let frame_period = 8.333;
@@ -410,6 +430,9 @@ fn canvas_fill(
     let avalanche_apply_pipeline = AvalancheApplyPipeline::create(
         &context,
         make_prog(include_str!("shaders/avalanche_apply.frag")),
+    );
+    let new_avalanche_pipeline = NewAvalanchePipeline::create(
+        &context, make_prog(include_str!("shaders/avalanche_v3.frag"))
     );
     let shadow_pipeline = Rc::new(RefCell::new(ShadowPipeline::create(
         &context,
@@ -428,7 +451,7 @@ fn canvas_fill(
     let wind_pipeline =
         WindPipeline::create(&context, make_prog(include_str!("shaders/wind.frag")));
 
-    let shadow = Rc::new(make_shadow(&context, sand_w, sand_h));
+    let shadow = Rc::new(make_shadow(&context, window_w, window_h));
     let random = Rc::new(make_rand(&context, sand_w, sand_h));
     let delta_sand = make_sand(&context, sand_w, sand_h);
     let sand = Rc::new(RefCell::new(make_sand(&context, sand_w, sand_h)));
@@ -440,7 +463,9 @@ fn canvas_fill(
     // let wind_shadow_lookahead = Rc::new(RefCell::new(make_shadow_lookahead(&context, sand_w / 2, sand_h / 2)));
 
     let wind_shadow = Rc::new(make_shadow(&context, sand_w, sand_h));
-    let wind_shadow_lookahead = Rc::new(RefCell::new(make_shadow_lookahead(&context, sand_w, sand_h)));
+    let wind_shadow_lookahead = Rc::new(RefCell::new(make_shadow_lookahead(
+        &context, sand_w, sand_h,
+    )));
 
     let (next_frame, set_next_frame) = signal(());
     let next_frame_throttled: Signal<()> = signal_throttled(next_frame, frame_period);
@@ -449,15 +474,9 @@ fn canvas_fill(
         *set_next_frame.write();
     });
 
-    let (signal_drop, set_signal_drop) = signal(());
-    let signal_drop_throttled: Signal<()> = signal_throttled(signal_drop, drop_period);
-
     {
         Effect::new(move || {
             next_frame.get();
-            if mouse.get_untracked().0.is_some() {
-                set_signal_drop.write();
-            }
             request_animation_frame(move || {
                 *set_next_frame.write();
             });
@@ -474,6 +493,14 @@ fn canvas_fill(
         quad: quad.clone(),
         calc: avalanche_calc_pipeline,
         apply: avalanche_apply_pipeline,
+        max_height,
+    };
+
+    let mut new_avalanche_stage = NewAvalancheStage {
+        context: context.clone(),
+        sand: sand.clone(),
+        quad: quad.clone(),
+        calc: new_avalanche_pipeline,
         max_height,
     };
 
@@ -557,34 +584,43 @@ fn canvas_fill(
     };
 
     let mut wind_dir = (0.0, 0.0, 0.0);
-    let mut sun_dir = (20.0, 60.0, 500.0);
+    let mut sun_dir = (sand_w as f32 / 8.0, sand_h as f32 / 8.0, min(sand_w , sand_h) as f32 / 4.0);
     let mut prev_frame = 0.0;
+    // let mut prev_drop = None;
     Effect::new(move || {
         next_frame_throttled.get();
         let (click_start, mouse_x, mouse_y) = mouse.get_untracked();
+        let now = window().performance().unwrap().now();
         if let Some((start_x, start_y)) = click_start {
-            let dir = ((mouse_x - start_x) as f32 , (mouse_y - start_y) as f32);
+            let dir = ((mouse_x - start_x) as f32, (mouse_y - start_y) as f32);
             match input_mode.get_untracked().as_str() {
                 "shadow" => {
-                    sun_dir = (dir.0, dir.1, min(window_h, window_w) as f32 / 4.0);
+                    sun_dir = (dir.0, dir.1, min(sand_w, sand_h) as f32 / 4.0);
                     // log!("sun direction {:?}", sun_dir)
-                },
+                }
 
                 "wind" => {
                     let mag = (dir.0.powi(2) + dir.1.powi(2)).sqrt();
                     wind_dir = (dir.0 / mag, dir.1 / mag, 38.0f32.to_radians().tan());
-                },
+                }
 
                 "sand" => {
-                    drop_stage.update(mouse_x as f32, mouse_y as f32);
+                    // if (!prev_drop.is_some() || now - prev_drop.unwrap() > 500.0) {
+
+                        drop_stage.update(mouse_x as f32, mouse_y as f32);
+                        // prev_drop = Some(now);
+                    // }
+
                 }
-                _ => ()
+                _ => (),
             };
         }
-        let now = window().performance().unwrap().now();
         *set_fps.write() = 1000.0 / (now - prev_frame);
         prev_frame = now;
         avalanche_stage.update();
+        for _ in 0..8 {
+            // new_avalanche_stage.update();
+        }
         lookahead_stage.update((sun_dir.0, sun_dir.1));
         shadow_stage.update(sun_dir);
         wind_lookahead_stage.update((wind_dir.0, wind_dir.1));
