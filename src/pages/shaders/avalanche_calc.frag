@@ -51,7 +51,7 @@ float movement_direction() {
         return 1.0;
     }
     // float bias = 0.3;
-    float bias = 0.0;
+    float bias = 0.3;
     int selection = int(round( min(1.0, rand + bias) * (acceptors - 1.0)));
     for (int i = 0; i < 8; i++) {
         if (can_accept_sand[i] && selection-- == 0) {

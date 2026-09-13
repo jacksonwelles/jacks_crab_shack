@@ -33,11 +33,13 @@ void main() {
     float ground_sand = texture(u_sand, v_texcoord).x;
     float windborn_sand = texture(u_sand, v_texcoord).y;
     float diffuse = max(0.0, dot(normalize(u_direction), get_normal()));
+    // float wind_diffuse = max(0.0, dot(normalize(u_direction), vec3(0.0, 0.0, 1.0)));
 
-    vec3 base = mix(GROUND, SAND, ground_sand + 0.2);
+    vec3 base_color = mix(GROUND, SAND, min(0.5, ground_sand + 0.2));
     // if (ground_sand == 0.0) {
     //     base = GROUND;
     // }
-    base = base * (SKY * 0.5 + SUN * 0.8 * diffuse * (1.0 -  shadow));
-    fragColor = vec4(mix(base.xyz, SAND, windborn_sand * 64.0), 1.0); //mix(base, SAND, windborn_sand * 64.0);
+    vec3 final_color = base_color * (SKY * 0.5 + SUN * 0.8 * diffuse * (1.0 -  shadow));
+    vec3 wind_color = base_color * (SKY * 0.5 + SUN * 0.9 * (1.0 - shadow));
+    fragColor = vec4(mix(final_color, wind_color, min(windborn_sand * 200.0, 0.7)), 1.0); //mix(base, SAND, windborn_sand * 64.0);
 }

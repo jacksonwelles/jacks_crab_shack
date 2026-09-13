@@ -11,8 +11,6 @@ use leptos::html::Canvas;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::prelude::*;
 
-use leptos::logging::log;
-
 use leptos_use::UseEventListenerOptions;
 use leptos_use::signal_throttled;
 use leptos_use::use_event_listener_with_options;
@@ -38,8 +36,6 @@ render_pipeline!(RandomPipeline, "shaders/random.frag");
 render_pipeline!(WindPipeline, "shaders/wind.frag");
 
 render_pipeline!(DrawPipeline, "shaders/draw.frag");
-
-render_pipeline!(NewAvalanchePipeline, "shaders/avalanche_v3.frag");
 
 struct RandomStage {
     context: WebGl2RenderingContext,
@@ -90,28 +86,6 @@ impl AvalancheStage {
         self.sand.borrow_mut().swap();
     }
 }
-
-struct NewAvalancheStage {
-    context: WebGl2RenderingContext,
-    sand: Rc<RefCell<SwappableTexture>>,
-    quad: Rc<Quad>,
-    calc: NewAvalanchePipeline,
-    max_height: f32,
-}
-
-impl NewAvalancheStage {
-    pub fn update(&mut self) -> () {
-        self.calc.set_arguments(
-            &self.context,
-            self.max_height,
-            self.sand.borrow().read(),
-            self.sand.borrow().read().texel_size(),
-        );
-        self.quad.blit(Some(self.sand.borrow().write()));
-        self.sand.borrow_mut().swap();
-    }
-}
-
 struct DropStage {
     context: WebGl2RenderingContext,
     sand: Rc<RefCell<SwappableTexture>>,
@@ -266,7 +240,7 @@ pub fn App() -> impl IntoView {
     let canvas_ref = NodeRef::<Canvas>::new();
     let (mouse, set_mouse) = signal((None::<(i32, i32)>, 0i32, 0i32));
     let evt_options = UseEventListenerOptions::default().passive(true);
-    let _ = use_event_listener_with_options(
+    on_cleanup(use_event_listener_with_options(
         canvas_ref,
         leptos::ev::mousedown,
         move |evt| {
@@ -277,16 +251,16 @@ pub fn App() -> impl IntoView {
             );
         },
         evt_options,
-    );
-    let _ = use_event_listener_with_options(
+    ));
+    on_cleanup(use_event_listener_with_options(
         window(),
         leptos::ev::mouseup,
         move |_| {
             set_mouse.update(|tup| tup.0 = None);
         },
         evt_options,
-    );
-    let _ = use_event_listener_with_options(
+    ));
+    on_cleanup(use_event_listener_with_options(
         canvas_ref,
         leptos::ev::mousemove,
         move |evt| {
@@ -296,8 +270,8 @@ pub fn App() -> impl IntoView {
             });
         },
         evt_options,
-    );
-    let _ = use_event_listener_with_options(
+    ));
+    on_cleanup(use_event_listener_with_options(
         canvas_ref,
         leptos::ev::touchstart,
         move |evt| {
@@ -318,14 +292,14 @@ pub fn App() -> impl IntoView {
             *set_mouse.write() = (Some((canvas_x, canvas_y)), canvas_x, canvas_y as i32);
         },
         evt_options,
-    );
-    let _ = use_event_listener_with_options(
+    ));
+    on_cleanup(use_event_listener_with_options(
         canvas_ref,
         leptos::ev::touchend,
         move |_| set_mouse.update(|tup| tup.0 = None),
         evt_options,
-    );
-    let _ = use_event_listener_with_options(
+    ));
+    on_cleanup(use_event_listener_with_options(
         canvas_ref,
         leptos::ev::touchmove,
         move |evt| {
@@ -343,7 +317,7 @@ pub fn App() -> impl IntoView {
             });
         },
         evt_options,
-    );
+    ));
     let input_mode = RwSignal::new("sand".to_string());
     let (fps, set_fps) = signal(0.0);
     Effect::new(move |_| {
@@ -375,10 +349,10 @@ pub fn App() -> impl IntoView {
         <fieldset>
             <label>
                 "Sand" <input type="radio" name="color" value="sand" bind:group=input_mode />
-            </label>
+            </label> <br />
             <label>
                 "Wind" <input type="radio" name="color" value="wind" bind:group=input_mode />
-            </label>
+            </label> <br />
             <label>
                 "Sun" <input type="radio" name="color" value="shadow" bind:group=input_mode />
             </label>
@@ -425,9 +399,6 @@ fn canvas_fill(
         &context,
         make_prog(include_str!("shaders/avalanche_apply.frag")),
     );
-    let new_avalanche_pipeline = NewAvalanchePipeline::create(
-        &context, make_prog(include_str!("shaders/avalanche_v3.frag"))
-    );
     let shadow_pipeline = Rc::new(RefCell::new(ShadowPipeline::create(
         &context,
         make_prog(include_str!("shaders/optimized_shadow.frag")),
@@ -472,7 +443,9 @@ fn canvas_fill(
         Effect::new(move || {
             next_frame.get();
             request_animation_frame(move || {
-                *set_next_frame.write();
+                if !set_next_frame.is_disposed() {
+                    *set_next_frame.write();
+                }
             });
         });
     }
@@ -487,14 +460,6 @@ fn canvas_fill(
         quad: quad.clone(),
         calc: avalanche_calc_pipeline,
         apply: avalanche_apply_pipeline,
-        max_height,
-    };
-
-    let mut new_avalanche_stage = NewAvalancheStage {
-        context: context.clone(),
-        sand: sand.clone(),
-        quad: quad.clone(),
-        calc: new_avalanche_pipeline,
         max_height,
     };
 
@@ -586,26 +551,19 @@ fn canvas_fill(
         let (click_start, mouse_x, mouse_y) = mouse.get_untracked();
         let now = window().performance().unwrap().now();
         if let Some((start_x, start_y)) = click_start {
-            let dir = ((mouse_x - start_x) as f32, (mouse_y - start_y) as f32);
+            let dir = ((mouse_x - start_x) as f32, -(mouse_y - start_y) as f32);
             match input_mode.get_untracked().as_str() {
                 "shadow" => {
                     sun_dir = (dir.0, dir.1, min(sand_w, sand_h) as f32 / 4.0);
-                    // log!("sun direction {:?}", sun_dir)
                 }
 
                 "wind" => {
                     let mag = (dir.0.powi(2) + dir.1.powi(2)).sqrt();
-                    wind_dir = (dir.0 / mag, dir.1 / mag, 38.0f32.to_radians().tan());
-                    log!("wind direction {:?}", wind_dir)
+                    wind_dir = (- dir.0 / mag, - dir.1 / mag, 38.0f32.to_radians().tan());
                 }
 
                 "sand" => {
-                    // if (!prev_drop.is_some() || now - prev_drop.unwrap() > 500.0) {
-
-                        drop_stage.update(mouse_x as f32, mouse_y as f32);
-                        // prev_drop = Some(now);
-                    // }
-
+                    drop_stage.update(mouse_x as f32, mouse_y as f32);
                 }
                 _ => (),
             };
@@ -613,9 +571,6 @@ fn canvas_fill(
         *set_fps.write() = 1000.0 / (now - prev_frame);
         prev_frame = now;
         avalanche_stage.update();
-        for _ in 0..8 {
-            // new_avalanche_stage.update();
-        }
         lookahead_stage.update((sun_dir.0, sun_dir.1));
         shadow_stage.update(sun_dir);
 

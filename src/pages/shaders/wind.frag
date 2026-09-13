@@ -44,22 +44,25 @@ void main() {
     float base_sand = texture(u_sand, v_texcoord).x;
     float shadowed = texture(u_shadow, v_texcoord).x;
     float rand = texture(u_random, v_texcoord).x;
-    float low_wind_height = 1.0 / u_max_height;
-    float low_wind_rate = 0.01 * u_pickup_rate;
+    float low_wind_height = 0.9 / u_max_height;
+    float low_wind_rate = 0.05 * u_pickup_rate;
+    float low_wind_deposit = 0.02 / u_max_height;
 
     float deposit_rate = 0.6 * u_pickup_rate;
-    float low_wind_deposit = 1.0 / u_max_height;
     float normal_deposit = 0.5 / u_max_height;
-    float shadow_deposit = 5.0 / u_max_height;
+    float shadow_deposit = windborn_sand; //10.0 / u_max_height;
+    float shadow_deposit_rate = u_pickup_rate;
 
     float normal_lift = 0.5 / u_max_height;
-    float lift_rate = u_pickup_rate;
+    float lift_rate = 0.7 * u_pickup_rate;
     bool in_shadow = shadowed > 0.5;
 
     float deposit_rand = rand;
     float lift_rand = mod(rand, 0.0625) * 16.0;
     if (in_shadow) {
-        deposit(base_sand, windborn_sand, shadow_deposit);
+        if (deposit_rand > shadow_deposit_rate) {
+            deposit(base_sand, windborn_sand, shadow_deposit);
+        }
     } else if (base_sand < low_wind_height) {
         if (deposit_rand < low_wind_rate) {
             deposit(base_sand, windborn_sand, low_wind_deposit);
@@ -72,6 +75,9 @@ void main() {
     if (!in_shadow && base_sand > low_wind_height) {
         if (lift_rand < lift_rate) {
             lift(base_sand, windborn_sand, normal_lift);
+            if (base_sand <= low_wind_height) {
+                lift(base_sand, windborn_sand, base_sand);
+            }
         }
     }
     fragColor = vec4(base_sand, windborn_sand, 0.0, 0.0);

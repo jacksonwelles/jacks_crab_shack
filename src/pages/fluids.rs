@@ -18,7 +18,6 @@ use web_sys::HtmlElement;
 use web_sys::MouseEvent;
 use web_sys::Touch;
 use web_sys::WebGl2RenderingContext;
-use web_sys::console;
 
 use leptos_use::{UseMouseCoordType, UseMouseOptions, use_mouse_with_options};
 
@@ -69,7 +68,6 @@ pub fn App() -> impl IntoView {
                 .unwrap();
             canvas_fill(context, mouse_rc.clone());
         }
-        console::log_1(&"Running Main Effect".into());
     });
 
     view! {
@@ -215,6 +213,10 @@ fn canvas_fill(context: WebGl2RenderingContext, mouse: Rc<UseMouseReturn>) {
 
     *g.borrow_mut() = Some(Closure::new(move || {
         let now = window().performance().unwrap().now();
+
+        if mouse.set_x.is_disposed() {
+            return;
+        }
 
         // Velocity Boundary
         boundary_pipeline.set_arguments(

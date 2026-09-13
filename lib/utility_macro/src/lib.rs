@@ -3,6 +3,7 @@ use proc_macro_error::{abort, proc_macro_error};
 use quote::quote;
 use syn::Ident;
 
+use core::panic;
 use std::fs;
 use std::path::Path;
 
@@ -116,7 +117,7 @@ fn parse_shader_path(path: &str, span: &proc_macro::Span) -> Result<Vec<Uniform>
     let mut call_file = span.file();
     if call_file.is_empty() {
         // probably from the analyzer, try something and hope it sticks...
-        call_file = "src/foo".to_string();
+        call_file = "src/pages/foo.rs".to_string();
     }
 
     let full_path = Path::new(&call_file).with_file_name(unquoted_path);
