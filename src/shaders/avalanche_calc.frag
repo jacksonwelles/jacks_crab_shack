@@ -29,7 +29,6 @@ float movement_direction() {
         false, false, false, false, false, false, false, false
     );
     float acceptors = 0.0;
-    float diagonal_chance = 0.0;
     for (int i = 0; i < 8; i++) {
         float neighbor = texture(
             u_sand,
@@ -48,18 +47,14 @@ float movement_direction() {
     if (acceptors == 0.0) {
         return 1.0;
     }
-    float remainder = rand;
-    float adjusted_rand = rand * (acceptors - 1.0);
-    float rounded = round(adjusted_rand);
-    if (acceptors > 1.0) {
-        remainder = adjusted_rand - rounded;
+    if (acceptors == 1.0){
+        return 1.0;
     }
-    int selection = int(rounded);
+    // float bias = 0.3;
+    float bias = 0.0;
+    int selection = int(round( min(1.0, rand + bias) * (acceptors - 1.0)));
     for (int i = 0; i < 8; i++) {
         if (can_accept_sand[i] && selection-- == 0) {
-            if (remainder > diagonal_chance) {
-                return 1.0;
-            }
             return float(i) / 8.0;
         }
     }

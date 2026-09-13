@@ -29,39 +29,50 @@ vec4 tex_bilerp(in sampler2D tex, in vec2 uv, in vec2 tsize) {
     return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
 }
 
-float hash(in vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * 0.13);
-    p3 += dot(p3, p3.yzx + 3.333);
-    return fract((p3.x + p3.y) * p3.z);
+void deposit(inout float base, inout float windborn, in float amt) {
+    base += min(windborn, amt);
+    windborn -= min(windborn, amt);
+}
+
+void lift(inout float base, inout float windborn, in float amt) {
+    base -= min(base, amt);
+    windborn += min(base, amt);
 }
 
 void main() {
-    float new_sand = tex_bilerp(u_sand, v_texcoord + normalize(u_direction) * u_wind_speed, u_texel_size).y;
+    float windborn_sand = tex_bilerp(u_sand, v_texcoord + normalize(u_direction) * u_wind_speed, u_texel_size).y;
     float base_sand = texture(u_sand, v_texcoord).x;
     float shadowed = texture(u_shadow, v_texcoord).x;
     float rand = texture(u_random, v_texcoord).x;
-    if (shadowed > 0.5) {
-        if (rand < u_pickup_rate) {
-            base_sand += new_sand;
-            new_sand = 0.0;
+    float low_wind_height = 1.0 / u_max_height;
+    float low_wind_rate = 0.01 * u_pickup_rate;
+
+    float deposit_rate = 0.6 * u_pickup_rate;
+    float low_wind_deposit = 1.0 / u_max_height;
+    float normal_deposit = 0.5 / u_max_height;
+    float shadow_deposit = 5.0 / u_max_height;
+
+    float normal_lift = 0.5 / u_max_height;
+    float lift_rate = u_pickup_rate;
+    bool in_shadow = shadowed > 0.5;
+
+    float deposit_rand = rand;
+    float lift_rand = mod(rand, 0.0625) * 16.0;
+    if (in_shadow) {
+        deposit(base_sand, windborn_sand, shadow_deposit);
+    } else if (base_sand < low_wind_height) {
+        if (deposit_rand < low_wind_rate) {
+            deposit(base_sand, windborn_sand, low_wind_deposit);
         }
-    } else if (base_sand < 1.0 / u_max_height) {
-        if (rand < 0.4 * u_pickup_rate) {
-            base_sand += new_sand;
-            new_sand = 0.0;
-        }
-    } else {
-        if (rand < 0.6 * u_pickup_rate) {
-            base_sand += new_sand;
-            new_sand = 0.0;
+    } else /* height above cutoff*/ {
+        if (deposit_rand < deposit_rate) {
+            deposit(base_sand, windborn_sand, normal_deposit);
         }
     }
-    if (shadowed < 0.5) {
-        float sand_picked_up = 0.5f / u_max_height;
-        if (rand < u_pickup_rate) {
-            new_sand = min (1.0, new_sand + min(base_sand, sand_picked_up));
-            base_sand = max(0.0, base_sand - sand_picked_up);
+    if (!in_shadow && base_sand > low_wind_height) {
+        if (lift_rand < lift_rate) {
+            lift(base_sand, windborn_sand, normal_lift);
         }
     }
-    fragColor = vec4(base_sand, new_sand, 0.0, 0.0);
+    fragColor = vec4(base_sand, windborn_sand, 0.0, 0.0);
 }

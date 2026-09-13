@@ -346,7 +346,6 @@ pub fn App() -> impl IntoView {
     );
     let input_mode = RwSignal::new("sand".to_string());
     let (fps, set_fps) = signal(0.0);
-    let (wind_on, set_wind_on) = signal(true);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
             canvas.set_width(1024);
@@ -359,7 +358,6 @@ pub fn App() -> impl IntoView {
                 .unwrap();
             canvas_fill(
                 context.clone(),
-                wind_on.into(),
                 set_fps.into(),
                 mouse.into(),
                 input_mode.into(),
@@ -372,9 +370,6 @@ pub fn App() -> impl IntoView {
         <canvas style:touch-action="pinch-zoom" node_ref=canvas_ref />
         <br />
         <pre>{move || { format!("{:.2}", fps_throttled.get()) }}</pre>
-        <button on:click=move |_| {
-            *set_wind_on.write() = !wind_on.get();
-        }>{move || { if wind_on.get() { "WIND STOP" } else { "WIND START" } }}</button>
         <br />
         <br />
         <fieldset>
@@ -393,7 +388,6 @@ pub fn App() -> impl IntoView {
 
 fn canvas_fill(
     context: WebGl2RenderingContext,
-    wind_on: Signal<bool>,
     set_fps: WriteSignal<f64>,
     mouse: Signal<(Option<(i32, i32)>, i32, i32)>,
     input_mode: Signal<String>,
@@ -418,7 +412,7 @@ fn canvas_fill(
     let sand_h = window_h;
     let scale = 4.0f32;
     let max_height = 255.0f32;
-    let radius = 100.0;
+    let radius = 200.0;
     let wind_speed = 0.0005;
     let pickup_rate = 0.5;
     let frame_period = 8.333;
@@ -602,6 +596,7 @@ fn canvas_fill(
                 "wind" => {
                     let mag = (dir.0.powi(2) + dir.1.powi(2)).sqrt();
                     wind_dir = (dir.0 / mag, dir.1 / mag, 38.0f32.to_radians().tan());
+                    log!("wind direction {:?}", wind_dir)
                 }
 
                 "sand" => {
@@ -623,12 +618,14 @@ fn canvas_fill(
         }
         lookahead_stage.update((sun_dir.0, sun_dir.1));
         shadow_stage.update(sun_dir);
-        wind_lookahead_stage.update((wind_dir.0, wind_dir.1));
-        wind_shadow_stage.update(wind_dir);
+
+
+        if wind_dir.0.is_normal() && wind_dir.1.is_normal() {
+            wind_lookahead_stage.update((wind_dir.0, wind_dir.1));
+            wind_shadow_stage.update(wind_dir);
+            wind_stage.update((wind_dir.0, wind_dir.1));
+        }
         draw_stage.update(sun_dir);
-        // if wind_on.get_untracked() {
-        //     wind_stage.update((wind_dir.0, wind_dir.1));
-        // }
         random_stage.update();
     });
 }
