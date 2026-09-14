@@ -339,14 +339,11 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    let fps_throttled: Signal<f64> = signal_throttled(fps, 500.0);
     view! {
+        <h1 style:margin="40px">"WebGL Dune Saltation"</h1>
         <canvas style:touch-action="pinch-zoom" node_ref=canvas_ref />
         <br />
-        <pre>{move || { format!("{:.2}", fps_throttled.get()) }}</pre>
-        <br />
-        <br />
-        <fieldset>
+        <fieldset style:font-size="40px">
             <label>
                 "Sand" <input type="radio" name="color" value="sand" bind:group=input_mode />
             </label> <br />
@@ -357,6 +354,10 @@ pub fn App() -> impl IntoView {
                 "Sun" <input type="radio" name="color" value="shadow" bind:group=input_mode />
             </label>
         </fieldset>
+        <h2 style:margin="40px">"Written by Jackson Welles"</h2>
+        <h2 style:margin="40px">"Base saltation algorithm from Brad Werner, via "
+            <a href="https://smallpond.ca/jim/sand/dunefieldMorphology/index.html"> "Jim Elder's excellent write up." </a> </h2>
+
     }
 }
 
@@ -543,7 +544,11 @@ fn canvas_fill(
     };
 
     let mut wind_dir = (0.0, 0.0, 0.0);
-    let mut sun_dir = (sand_w as f32 / 8.0, sand_h as f32 / 8.0, min(sand_w , sand_h) as f32 / 4.0);
+    let mut sun_dir = (
+        sand_w as f32 / 8.0,
+        sand_h as f32 / 8.0,
+        min(sand_w, sand_h) as f32 / 4.0,
+    );
     let mut prev_frame = 0.0;
     // let mut prev_drop = None;
     Effect::new(move || {
@@ -559,7 +564,7 @@ fn canvas_fill(
 
                 "wind" => {
                     let mag = (dir.0.powi(2) + dir.1.powi(2)).sqrt();
-                    wind_dir = (- dir.0 / mag, - dir.1 / mag, 38.0f32.to_radians().tan());
+                    wind_dir = (-dir.0 / mag, -dir.1 / mag, 38.0f32.to_radians().tan());
                 }
 
                 "sand" => {
@@ -573,7 +578,6 @@ fn canvas_fill(
         avalanche_stage.update();
         lookahead_stage.update((sun_dir.0, sun_dir.1));
         shadow_stage.update(sun_dir);
-
 
         if wind_dir.0.is_normal() && wind_dir.1.is_normal() {
             wind_lookahead_stage.update((wind_dir.0, wind_dir.1));

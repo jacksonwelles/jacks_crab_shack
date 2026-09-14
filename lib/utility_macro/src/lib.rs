@@ -3,7 +3,6 @@ use proc_macro_error::{abort, proc_macro_error};
 use quote::quote;
 use syn::Ident;
 
-use core::panic;
 use std::fs;
 use std::path::Path;
 
