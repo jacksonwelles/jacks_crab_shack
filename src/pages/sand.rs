@@ -319,7 +319,6 @@ pub fn App() -> impl IntoView {
         evt_options,
     ));
     let input_mode = RwSignal::new("sand".to_string());
-    let (fps, set_fps) = signal(0.0);
     Effect::new(move |_| {
         if let Some(canvas) = canvas_ref.get() {
             canvas.set_width(1024);
@@ -332,7 +331,6 @@ pub fn App() -> impl IntoView {
                 .unwrap();
             canvas_fill(
                 context.clone(),
-                set_fps.into(),
                 mouse.into(),
                 input_mode.into(),
             );
@@ -363,7 +361,6 @@ pub fn App() -> impl IntoView {
 
 fn canvas_fill(
     context: WebGl2RenderingContext,
-    set_fps: WriteSignal<f64>,
     mouse: Signal<(Option<(i32, i32)>, i32, i32)>,
     input_mode: Signal<String>,
 ) {
@@ -549,12 +546,10 @@ fn canvas_fill(
         sand_h as f32 / 8.0,
         min(sand_w, sand_h) as f32 / 4.0,
     );
-    let mut prev_frame = 0.0;
     // let mut prev_drop = None;
     Effect::new(move || {
         next_frame_throttled.get();
         let (click_start, mouse_x, mouse_y) = mouse.get_untracked();
-        let now = window().performance().unwrap().now();
         if let Some((start_x, start_y)) = click_start {
             let dir = ((mouse_x - start_x) as f32, -(mouse_y - start_y) as f32);
             match input_mode.get_untracked().as_str() {
@@ -573,8 +568,6 @@ fn canvas_fill(
                 _ => (),
             };
         }
-        *set_fps.write() = 1000.0 / (now - prev_frame);
-        prev_frame = now;
         avalanche_stage.update();
         lookahead_stage.update((sun_dir.0, sun_dir.1));
         shadow_stage.update(sun_dir);
