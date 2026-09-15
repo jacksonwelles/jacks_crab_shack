@@ -24,26 +24,30 @@ vec2 get_direction(in int idx) {
 
 float new_height() {
     float sand = texture(u_sand, v_texcoord).r;
-    int move_dir = int(round(texture(u_delta, v_texcoord).r * 8.0));
+    vec4 local_delta = texture(u_delta, v_texcoord);
+    int move_dir = int(round(local_delta.r * 8.0));
+    float move_amount = local_delta.g;
 
     float change_in_sand = 0.0;
     if (move_dir != 8) {
-        change_in_sand -= 1.0 / u_max_height;
+        change_in_sand -= move_amount;
     }
 
     for (int i = 0; i < 8; i++) {
-        int neighbor_dir = int(round(texture(
+        vec4 neighbor_delta = texture(
             u_delta,
             v_texcoord + get_direction(i) * u_texel_size
-        ).r * 8.0));
+        );
+        int neighbor_dir = int(round(neighbor_delta.r * 8.0));
+        float neighbor_amount = neighbor_delta.g;
         if (neighbor_dir == 8) {
             continue;
         }
         if (int(mod(float(neighbor_dir + 4), 8.0)) == i) {
-            change_in_sand += 1.0 / u_max_height;
+            change_in_sand += neighbor_amount;
         }
     }
-    return (sand + change_in_sand);
+    return min(u_max_height, sand + change_in_sand);
 }
 
 void main() {

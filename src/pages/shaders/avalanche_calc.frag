@@ -11,9 +11,8 @@ uniform sampler2D u_random;
 uniform vec2 u_texel_size;
 
 
-float movement_direction() {
+float movement_direction(float rand) {
     float sand = texture(u_sand, v_texcoord).r;
-    float rand = texture(u_random, v_texcoord).x;
 
     vec2 directions[8] = vec2[8](
         vec2( 0.0,  1.0),
@@ -34,9 +33,6 @@ float movement_direction() {
             u_sand,
             v_texcoord + directions[i] * u_texel_size
         ).r;
-        // if ((i & 1) == 1) {
-        //     continue;
-        // }
         if ((sand - neighbor) * u_max_height > 2.0) {
             can_accept_sand[i] = true;
             acceptors += 1.0;
@@ -50,9 +46,7 @@ float movement_direction() {
     if (acceptors == 1.0){
         return 1.0;
     }
-    // float bias = 0.3;
-    float bias = 0.3;
-    int selection = int(round( min(1.0, rand + bias) * (acceptors - 1.0)));
+    int selection = int(round(rand * (acceptors - 1.0)));
     for (int i = 0; i < 8; i++) {
         if (can_accept_sand[i] && selection-- == 0) {
             return float(i) / 8.0;
@@ -62,5 +56,8 @@ float movement_direction() {
 }
 
 void main() {
-    fragColor = vec4(movement_direction(), 0.0, 0.0, 0.0);
+    float movement_rand = texture(u_random, v_texcoord).x;
+    float amt_rand = mod(movement_rand, 0.125) * 8.0;
+    float amt = amt_rand * 0.05 + 0.975;
+    fragColor = vec4(movement_direction(movement_rand), amt / u_max_height, 0.0, 0.0);
 }

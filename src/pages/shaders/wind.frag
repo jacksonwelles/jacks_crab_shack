@@ -49,7 +49,7 @@ void main() {
     float low_wind_deposit = 0.02 / u_max_height;
 
     float deposit_rate = 0.6 * u_pickup_rate;
-    float normal_deposit = 0.5 / u_max_height;
+    float normal_deposit = windborn_sand; // 0.5 / u_max_height;
     float shadow_deposit = windborn_sand; //10.0 / u_max_height;
     float shadow_deposit_rate = u_pickup_rate;
 
