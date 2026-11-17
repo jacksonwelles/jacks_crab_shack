@@ -39,7 +39,7 @@ void main() {
     // if (ground_sand == 0.0) {
     //     base = GROUND;
     // }
-    vec3 final_color = base_color * (SKY * 0.5 + SUN * 0.8 * diffuse * (1.0 -  shadow));
+    vec3 final_color = base_color * (SKY * 0.5 + SUN * 0.7 * diffuse * (1.0 -  shadow));
     vec3 wind_color = base_color * (SKY * 0.5 + SUN * 0.9 * (1.0 - shadow));
-    fragColor = vec4(mix(final_color, wind_color, min(windborn_sand * 200.0, 0.7)), 1.0); //mix(base, SAND, windborn_sand * 64.0);
+    fragColor = vec4(mix(final_color, wind_color, min(windborn_sand * 200.0, 0.6)), 1.0); //mix(base, SAND, windborn_sand * 64.0);
 }

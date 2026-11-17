@@ -1,6 +1,6 @@
 use std::cell::RefCell;
-use std::cmp::min;
 use std::convert::Infallible;
+use std::ops::Mul;
 use std::rc::Rc;
 
 use utility::prelude::*;
@@ -8,6 +8,7 @@ use utility::prelude::*;
 use utility_macro::render_pipeline;
 
 use leptos::html::Canvas;
+use leptos::logging::log;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::prelude::*;
 
@@ -37,6 +38,35 @@ render_pipeline!(WindPipeline, "shaders/wind.frag");
 
 render_pipeline!(DrawPipeline, "shaders/draw.frag");
 
+render_pipeline!(SunDialPipeline, "shaders/sun_dial.frag");
+
+render_pipeline!(WindDialPipeline, "shaders/wind_dial.frag");
+
+struct WindDialStage {
+    context: WebGl2RenderingContext,
+    quad: Rc<Quad>,
+    pipeline: WindDialPipeline,
+}
+
+impl WindDialStage {
+    pub fn update(&mut self, sun_location: (f32, f32)) -> () {
+        self.pipeline.set_arguments(&self.context, sun_location);
+        self.quad.blit(None);
+    }
+}
+
+struct SunDialStage {
+    context: WebGl2RenderingContext,
+    quad: Rc<Quad>,
+    pipeline: SunDialPipeline,
+}
+
+impl SunDialStage {
+    pub fn update(&mut self, sun_location: (f32, f32)) -> () {
+        self.pipeline.set_arguments(&self.context, sun_location);
+        self.quad.blit(None);
+    }
+}
 struct RandomStage {
     context: WebGl2RenderingContext,
     rand: Rc<BufferedTexture>,
@@ -91,15 +121,13 @@ struct DropStage {
     sand: Rc<RefCell<SwappableTexture>>,
     quad: Rc<Quad>,
     drop: DropPipeline,
-    window_w: usize,
-    window_h: usize,
     radius: f32,
     max_height: f32,
 }
 
 impl DropStage {
     pub fn update(&mut self, x: f32, y: f32) -> () {
-        let pos: (f32, f32) = (x / self.window_w as f32, 1.0 - y / self.window_h as f32);
+        let pos: (f32, f32) = (x, y);
         self.drop.set_arguments(
             &self.context,
             self.sand.borrow().read(),
@@ -187,22 +215,20 @@ struct WindStage {
     random: Rc<BufferedTexture>,
     pipeline: WindPipeline,
     max_height: f32,
-    pickup_rate: f32,
-    wind_speed: f32,
 }
 
 impl WindStage {
-    pub fn update(&mut self, direction: (f32, f32)) {
+    pub fn update(&mut self, direction: (f32, f32), speed: f32, pickup_rate: f32) {
         self.pipeline.set_arguments(
             &self.context,
             direction,
             self.sand.borrow().read().texel_size(),
-            self.wind_speed,
+            speed,
             self.max_height,
             self.sand.borrow().read(),
             &self.random,
             &self.shadow,
-            self.pickup_rate,
+            pickup_rate,
         );
         self.quad.blit(Some(self.sand.borrow().write()));
         self.sand.borrow_mut().swap();
@@ -235,20 +261,20 @@ impl DrawStage {
     }
 }
 
-#[component]
-pub fn App() -> impl IntoView {
-    let canvas_ref = NodeRef::<Canvas>::new();
-    let (mouse, set_mouse) = signal((None::<(i32, i32)>, 0i32, 0i32));
+pub fn configure_mouse_signal(
+    canvas_ref: NodeRef<Canvas>,
+    set_mouse: WriteSignal<(bool, f32, f32)>,
+    canvas_w: u32,
+    canvas_h: u32,
+) {
     let evt_options = UseEventListenerOptions::default().passive(true);
+    let to_tex = move |x: i32, y: i32| (x as f32 / canvas_w as f32, 1.0 - y as f32 / canvas_h as f32);
     on_cleanup(use_event_listener_with_options(
         canvas_ref,
         leptos::ev::mousedown,
         move |evt| {
-            *set_mouse.write() = (
-                Some((evt.offset_x(), evt.offset_y())),
-                evt.offset_x(),
-                evt.offset_y(),
-            );
+            let coords = to_tex(evt.offset_x(), evt.offset_y());
+            *set_mouse.write() = (true, coords.0, coords.1);
         },
         evt_options,
     ));
@@ -256,7 +282,7 @@ pub fn App() -> impl IntoView {
         window(),
         leptos::ev::mouseup,
         move |_| {
-            set_mouse.update(|tup| tup.0 = None);
+            set_mouse.update(|tup| tup.0 = false);
         },
         evt_options,
     ));
@@ -265,8 +291,11 @@ pub fn App() -> impl IntoView {
         leptos::ev::mousemove,
         move |evt| {
             set_mouse.update(|tup| {
-                tup.1 = evt.offset_x();
-                tup.2 = evt.offset_y();
+                if tup.0 {
+                    let coords = to_tex(evt.offset_x(), evt.offset_y());
+                    tup.1 = coords.0;
+                    tup.2 = coords.1;
+                }
             });
         },
         evt_options,
@@ -276,7 +305,7 @@ pub fn App() -> impl IntoView {
         leptos::ev::touchstart,
         move |evt| {
             if evt.touches().length() != 1 {
-                set_mouse.update(|tup| tup.0 = None);
+                set_mouse.update(|tup| tup.0 = false);
                 return;
             }
             let touch = evt.touches().item(0).unwrap();
@@ -287,16 +316,18 @@ pub fn App() -> impl IntoView {
                 .unwrap()
                 .clone();
             let rect = element.get_bounding_client_rect();
-            let canvas_x = touch.client_x() - rect.x() as i32;
-            let canvas_y = touch.client_y() - rect.y() as i32;
-            *set_mouse.write() = (Some((canvas_x, canvas_y)), canvas_x, canvas_y as i32);
+            let coords = to_tex(
+                touch.client_x() - rect.x() as i32,
+                touch.client_y() - rect.y() as i32,
+            );
+            *set_mouse.write() = (true, coords.0, coords.1);
         },
         evt_options,
     ));
     on_cleanup(use_event_listener_with_options(
         canvas_ref,
         leptos::ev::touchend,
-        move |_| set_mouse.update(|tup| tup.0 = None),
+        move |_| set_mouse.update(|tup| tup.0 = false),
         evt_options,
     ));
     on_cleanup(use_event_listener_with_options(
@@ -312,17 +343,104 @@ pub fn App() -> impl IntoView {
                 .clone();
             let rect = element.get_bounding_client_rect();
             set_mouse.update(|tup| {
-                tup.1 = touch.client_x() - rect.x() as i32;
-                tup.2 = touch.client_y() - rect.y() as i32;
+                if tup.0 {
+                    let coords = to_tex(
+                        touch.client_x() - rect.x() as i32,
+                        touch.client_y() - rect.y() as i32,
+                    );
+                    tup.1 = coords.0;
+                    tup.2 = coords.1;
+                }
             });
         },
         evt_options,
     ));
-    let input_mode = RwSignal::new("sand".to_string());
+}
+
+#[component]
+pub fn App() -> impl IntoView {
+    let canvas_w: u32 = 736;
+    let canvas_h: u32 = 736;
+
+    let dial_w: u32 = canvas_w / 2;
+    let dial_h: u32 = canvas_h / 2;
+    let frame_period = 8.333;
+
+    let main_canvas_ref = NodeRef::<Canvas>::new();
+    let wind_dial_canvas_ref = NodeRef::<Canvas>::new();
+    let sun_dial_canvas_ref = NodeRef::<Canvas>::new();
+
+    let (main_cursor, set_main_cursor) = signal((false, 0.0, 0.0));
+    let (wind_dial_cursor, set_wind_dial_cursor) = signal((false, 0.5, 0.5));
+    let (sun_dial_cursor, set_sun_dial_cursor) = signal((false, 0.75, 0.75));
+    let (next_frame, set_next_frame) = signal(());
+
+    configure_mouse_signal(main_canvas_ref, set_main_cursor, canvas_w, canvas_h);
+    configure_mouse_signal(wind_dial_canvas_ref, set_wind_dial_cursor, dial_w, dial_h);
+    configure_mouse_signal(sun_dial_canvas_ref, set_sun_dial_cursor, dial_w, dial_h);
+
+    request_animation_frame(move || {
+        *set_next_frame.write();
+    });
+
+    Effect::new(move || {
+        next_frame.get();
+        request_animation_frame(move || {
+            if !set_next_frame.is_disposed() {
+                *set_next_frame.write();
+            }
+        });
+    });
+
+    let next_frame_throttled: Signal<()> = signal_throttled(next_frame, frame_period);
+    let wind_direction = Signal::derive(move || {
+        let tup = wind_dial_cursor.get();
+        let mut x = -(tup.1 - 0.5) * 2.0;
+        let mut y = -(tup.2 - 0.5) * 2.0;
+        if x == 0.0 {
+            x += 0.01;
+        }
+        if y == 0.0 {
+            y+= 0.01;
+        }
+        let mut magnitude = x.hypot(y);
+        let tangent =  38.0f32.to_radians().tan();
+        if magnitude > 1.0 {
+            x /= magnitude;
+            y /= magnitude;
+            magnitude = 1.0;
+        }
+        (x, y, tangent * magnitude)
+    });
+    let sun_position_polar = Signal::derive(move || {
+        let tup = sun_dial_cursor.get();
+        let mut x = (tup.1 - 0.5) * 2.0;
+        let mut y = (tup.2 - 0.5) * 2.0;
+        if x == 0.0 {
+            x += 0.01;
+        }
+        if y == 0.0 {
+            y += 0.01;
+        }
+        (
+            1.0,
+            y.atan2(x),
+            (1.0 - (x.powi(2) + y.powi(2)).min(1.0)).sqrt().acos(),
+        )
+    });
+    let sand_drop_location = Signal::derive(move || {
+        let tup = main_cursor.get();
+        if tup.0 {
+            return Some((tup.1, tup.2));
+        } else {
+            return None;
+        }
+    });
+
     Effect::new(move |_| {
-        if let Some(canvas) = canvas_ref.get() {
-            canvas.set_width(1024);
-            canvas.set_height(1024);
+        if let Some(canvas) = main_canvas_ref.get() {
+            canvas.set_width(canvas_w);
+            canvas.set_height(canvas_h);
             let context = canvas
                 .get_context("webgl2")
                 .expect("get_context")
@@ -331,27 +449,55 @@ pub fn App() -> impl IntoView {
                 .unwrap();
             canvas_fill(
                 context.clone(),
-                mouse.into(),
-                input_mode.into(),
+                next_frame_throttled.into(),
+                sand_drop_location.into(),
+                sun_position_polar.into(),
+                wind_direction.into(),
+            );
+        }
+    });
+
+    Effect::new(move |_| {
+        if let Some(canvas) = sun_dial_canvas_ref.get() {
+            canvas.set_width(dial_w);
+            canvas.set_height(dial_h);
+            let context = canvas
+                .get_context("webgl2")
+                .expect("get_context")
+                .expect("object")
+                .dyn_into::<WebGl2RenderingContext>()
+                .unwrap();
+            sun_dial_fill(
+                context.clone(),
+                next_frame_throttled.into(),
+                sun_dial_cursor.into(),
+            );
+        }
+    });
+
+    Effect::new(move |_| {
+        if let Some(canvas) = wind_dial_canvas_ref.get() {
+            canvas.set_width(dial_w);
+            canvas.set_height(dial_h);
+            let context = canvas
+                .get_context("webgl2")
+                .expect("get_context")
+                .expect("object")
+                .dyn_into::<WebGl2RenderingContext>()
+                .unwrap();
+            wind_dial_fill(
+                context.clone(),
+                next_frame_throttled.into(),
+                wind_dial_cursor.into(),
             );
         }
     });
 
     view! {
         <h1 style:margin="40px">"WebGL Dune Saltation"</h1>
-        <canvas style:touch-action="pinch-zoom" node_ref=canvas_ref />
-        <br />
-        <fieldset style:font-size="40px">
-            <label>
-                "Sand" <input type="radio" name="color" value="sand" bind:group=input_mode />
-            </label> <br />
-            <label>
-                "Wind" <input type="radio" name="color" value="wind" bind:group=input_mode />
-            </label> <br />
-            <label>
-                "Sun" <input type="radio" name="color" value="shadow" bind:group=input_mode />
-            </label>
-        </fieldset>
+        <canvas style:touch-action="pinch-zoom" node_ref=main_canvas_ref />
+        <canvas style:touch-action="pinch-zoom" node_ref=sun_dial_canvas_ref />
+        <canvas style:touch-action="pinch-zoom" node_ref=wind_dial_canvas_ref />
         <h2 style:margin="40px">"Written by Jackson Welles"</h2>
         <h2 style:margin="40px">"Base saltation algorithm from Brad Werner, via "
             <a href="https://smallpond.ca/jim/sand/dunefieldMorphology/index.html"> "Jim Elder's excellent write up." </a> </h2>
@@ -359,10 +505,84 @@ pub fn App() -> impl IntoView {
     }
 }
 
+fn wind_dial_fill(
+    context: WebGl2RenderingContext,
+    next_frame: Signal<()>,
+    cursor: Signal<(bool, f32, f32)>,
+) {
+    context.get_extension("EXT_color_buffer_float").unwrap();
+    context.get_extension("OES_texture_float_linear").unwrap();
+    let quad_vert_shader = compile_shader(
+        &context,
+        GL::VERTEX_SHADER,
+        include_str!("shaders/quad.vert"),
+    )
+    .unwrap();
+    let make_prog = |frag_source: &str| {
+        let compiled = compile_shader(&context, GL::FRAGMENT_SHADER, frag_source).unwrap();
+        Program::create(&context, &quad_vert_shader, &compiled)
+    };
+
+    let quad = Rc::new(Quad::create(&context));
+
+    let wind_dial_pipeline =
+        WindDialPipeline::create(&context, make_prog(include_str!("shaders/wind_dial.frag")));
+
+    let mut wind_dial_stage = WindDialStage {
+        context: context.clone(),
+        quad: quad,
+        pipeline: wind_dial_pipeline,
+    };
+
+    Effect::new(move || {
+        next_frame.get();
+        let (_, x, y) = cursor.get_untracked();
+        wind_dial_stage.update((x, y));
+    });
+}
+
+fn sun_dial_fill(
+    context: WebGl2RenderingContext,
+    next_frame: Signal<()>,
+    cursor: Signal<(bool, f32, f32)>,
+) {
+    context.get_extension("EXT_color_buffer_float").unwrap();
+    context.get_extension("OES_texture_float_linear").unwrap();
+    let quad_vert_shader = compile_shader(
+        &context,
+        GL::VERTEX_SHADER,
+        include_str!("shaders/quad.vert"),
+    )
+    .unwrap();
+    let make_prog = |frag_source: &str| {
+        let compiled = compile_shader(&context, GL::FRAGMENT_SHADER, frag_source).unwrap();
+        Program::create(&context, &quad_vert_shader, &compiled)
+    };
+
+    let quad = Rc::new(Quad::create(&context));
+
+    let sun_dial_pipeline =
+        SunDialPipeline::create(&context, make_prog(include_str!("shaders/sun_dial.frag")));
+
+    let mut sun_dial_stage = SunDialStage {
+        context: context.clone(),
+        quad: quad,
+        pipeline: sun_dial_pipeline,
+    };
+
+    Effect::new(move || {
+        next_frame.get();
+        let (_, x, y) = cursor.get_untracked();
+        sun_dial_stage.update((x, y));
+    });
+}
+
 fn canvas_fill(
     context: WebGl2RenderingContext,
-    mouse: Signal<(Option<(i32, i32)>, i32, i32)>,
-    input_mode: Signal<String>,
+    next_frame: Signal<()>,
+    sand_drop_location: Signal<Option<(f32, f32)>>,
+    sun_position_polar: Signal<(f32, f32, f32)>,
+    wind_direction: Signal<(f32, f32, f32)>,
 ) {
     context.get_extension("EXT_color_buffer_float").unwrap();
     context.get_extension("OES_texture_float_linear").unwrap();
@@ -385,9 +605,6 @@ fn canvas_fill(
     let scale = 4.0f32;
     let max_height = 255.0f32;
     let radius = 200.0;
-    let wind_speed = 0.0005;
-    let pickup_rate = 0.5;
-    let frame_period = 8.333;
 
     let avalanche_calc_pipeline = AvalancheCalcPipeline::create(
         &context,
@@ -430,24 +647,6 @@ fn canvas_fill(
         &context, sand_w, sand_h,
     )));
 
-    let (next_frame, set_next_frame) = signal(());
-    let next_frame_throttled: Signal<()> = signal_throttled(next_frame, frame_period);
-
-    request_animation_frame(move || {
-        *set_next_frame.write();
-    });
-
-    {
-        Effect::new(move || {
-            next_frame.get();
-            request_animation_frame(move || {
-                if !set_next_frame.is_disposed() {
-                    *set_next_frame.write();
-                }
-            });
-        });
-    }
-
     let quad = Rc::new(Quad::create(&context));
 
     let mut avalanche_stage = AvalancheStage {
@@ -473,8 +672,6 @@ fn canvas_fill(
         sand: sand.clone(),
         quad: quad.clone(),
         drop: drop_pipeline,
-        window_w,
-        window_h,
         radius,
         max_height,
     };
@@ -536,48 +733,33 @@ fn canvas_fill(
         pipeline: wind_pipeline,
         random: random.clone(),
         max_height,
-        pickup_rate,
-        wind_speed,
     };
 
-    let mut wind_dir = (0.0, 0.0, 0.0);
-    let mut sun_dir = (
-        sand_w as f32 / 8.0,
-        sand_h as f32 / 8.0,
-        min(sand_w, sand_h) as f32 / 4.0,
-    );
-    // let mut prev_drop = None;
     Effect::new(move || {
-        next_frame_throttled.get();
-        let (click_start, mouse_x, mouse_y) = mouse.get_untracked();
-        if let Some((start_x, start_y)) = click_start {
-            let dir = ((mouse_x - start_x) as f32, -(mouse_y - start_y) as f32);
-            match input_mode.get_untracked().as_str() {
-                "shadow" => {
-                    sun_dir = (dir.0, dir.1, min(sand_w, sand_h) as f32 / 4.0);
-                }
-
-                "wind" => {
-                    let mag = (dir.0.powi(2) + dir.1.powi(2)).sqrt();
-                    wind_dir = (-dir.0 / mag, -dir.1 / mag, 38.0f32.to_radians().tan());
-                }
-
-                "sand" => {
-                    drop_stage.update(mouse_x as f32, mouse_y as f32);
-                }
-                _ => (),
-            };
+        next_frame.get();
+        let (r, theta, phi) = sun_position_polar.get_untracked();
+        let r_sin_phi = r.mul(phi.sin());
+        let sun_x = r_sin_phi.mul(theta.cos());
+        let sun_y = r_sin_phi.mul(theta.sin());
+        let sun_z = r.mul(phi.cos());
+        if let Some((sand_x, sand_y)) = sand_drop_location.get_untracked() {
+            drop_stage.update(sand_x, sand_y);
         }
-        avalanche_stage.update();
-        lookahead_stage.update((sun_dir.0, sun_dir.1));
-        shadow_stage.update(sun_dir);
 
-        if wind_dir.0.is_normal() && wind_dir.1.is_normal() {
+        let wind_dir = wind_direction.get_untracked();
+        let magnitude = wind_dir.0.hypot(wind_dir.1);
+
+        avalanche_stage.update();
+        lookahead_stage.update((sun_x, sun_y));
+        shadow_stage.update((sun_x, sun_y, sun_z));
+
+        // if wind_dir.0.is_normal() && wind_dir.1.is_normal() {
             wind_lookahead_stage.update((wind_dir.0, wind_dir.1));
             wind_shadow_stage.update(wind_dir);
-            wind_stage.update((wind_dir.0, wind_dir.1));
-        }
-        draw_stage.update(sun_dir);
+
+            wind_stage.update((wind_dir.0, wind_dir.1), 0.0015 * magnitude,  if magnitude > 0.2 {(magnitude - 0.2).mul(1.2).min(0.6)} else {0.0});
+        // }
+        draw_stage.update((sun_x, sun_y, sun_z));
         random_stage.update();
     });
 }
